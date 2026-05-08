@@ -1,4 +1,4 @@
-import type makeWASocket from '@whiskeysockets/baileys';
+import type makeWASocket from 'baileys';
 
 type Sock = ReturnType<typeof makeWASocket>;
 

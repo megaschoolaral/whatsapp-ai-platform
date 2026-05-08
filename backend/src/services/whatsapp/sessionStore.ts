@@ -5,7 +5,7 @@ import {
   type SignalDataTypeMap,
   BufferJSON,
   proto,
-} from '@whiskeysockets/baileys';
+} from 'baileys';
 import { prisma } from '../../prisma.js';
 import { encrypt, decrypt } from '../../crypto/aesGcm.js';
 

@@ -1,5 +1,5 @@
-import type makeWASocket from '@whiskeysockets/baileys';
-import type { WAMessage } from '@whiskeysockets/baileys';
+import type makeWASocket from 'baileys';
+import type { WAMessage } from 'baileys';
 import { prisma } from '../../prisma.js';
 import { logger } from '../../logger.js';
 import { downloadMedia, compressImage } from './media.js';

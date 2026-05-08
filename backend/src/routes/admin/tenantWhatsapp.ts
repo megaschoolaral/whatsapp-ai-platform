@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../../prisma.js';
 import { requireAuth, requireRole } from '../../auth/middleware.js';
-import { connectTenant, disconnectTenant } from '../../services/whatsapp/connect.js';
+import { connectTenant, disconnectTenant, resetTenantSession } from '../../services/whatsapp/connect.js';
 import { getSession } from '../../services/whatsapp/manager.js';
 
 export const adminTenantWhatsappRouter = Router({ mergeParams: true });
@@ -27,8 +27,10 @@ adminTenantWhatsappRouter.get('/status', async (req, res) => {
 });
 
 adminTenantWhatsappRouter.post('/refresh-qr', async (req, res) => {
-  await disconnectTenant((req.params as Record<string,string>).tenantId).catch(() => undefined);
-  await connectTenant((req.params as Record<string,string>).tenantId);
+  const tenantId = (req.params as Record<string,string>).tenantId;
+  // Wipe any partial/broken creds from prior attempts so we start clean.
+  await resetTenantSession(tenantId).catch(() => undefined);
+  await connectTenant(tenantId);
   res.json({ ok: true });
 });
 

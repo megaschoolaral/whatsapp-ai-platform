@@ -2,7 +2,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
-} from '@whiskeysockets/baileys';
+} from 'baileys';
 import type { Boom } from '@hapi/boom';
 import { logger } from '../../logger.js';
 import { prisma } from '../../prisma.js';
@@ -21,9 +21,10 @@ export async function connectTenant(tenantId: string): Promise<void> {
 
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: false,
-    browser: Browsers.appropriate('Chrome'),
+    browser: Browsers.macOS('Desktop'),
     syncFullHistory: false,
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false,
     version,
   });
   setSession(tenantId, { sock, status: 'connecting', lastQr: null });
@@ -119,4 +120,22 @@ export async function disconnectTenant(tenantId: string): Promise<void> {
     removeSession(tenantId);
   }
   await prisma.whatsappSession.update({ where: { tenantId }, data: { status: 'disconnected' } }).catch(() => undefined);
+}
+
+/**
+ * Wipe stored creds + keys for a tenant — call when re-pairing fresh
+ * (e.g. after a failed scan, badSession, or loggedOut). Forces a brand-new QR.
+ */
+export async function resetTenantSession(tenantId: string): Promise<void> {
+  await disconnectTenant(tenantId);
+  await prisma.whatsappSession.update({
+    where: { tenantId },
+    data: {
+      encryptedCreds: null,
+      encryptedKeys: null,
+      phoneNumber: null,
+      status: 'disconnected',
+      lastDisconnectReason: 'reset',
+    },
+  });
 }

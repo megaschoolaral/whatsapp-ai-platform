@@ -1,4 +1,4 @@
-import { downloadMediaMessage, type WAMessage } from '@whiskeysockets/baileys';
+import { downloadMediaMessage, type WAMessage } from 'baileys';
 import sharp from 'sharp';
 
 export async function downloadMedia(message: WAMessage): Promise<Buffer | null> {

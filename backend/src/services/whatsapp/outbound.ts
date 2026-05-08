@@ -1,4 +1,4 @@
-import type makeWASocket from '@whiskeysockets/baileys';
+import type makeWASocket from 'baileys';
 import { delay, randomBetween } from '../../utils/delay.js';
 import { canSendAndIncrement } from './antiBan.js';
 
