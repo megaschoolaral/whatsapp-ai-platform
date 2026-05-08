@@ -23,7 +23,12 @@ function client(tenant: TenantContext): GoogleGenAI {
 
 /** Ensure a FileSearchStore exists for the tenant. Returns the store resource name. */
 export async function ensureCorpus(tenant: TenantContext): Promise<string> {
-  if (tenant.apiKeys.geminiCorpusId) return tenant.apiKeys.geminiCorpusId;
+  // Reuse only if already in the new "fileSearchStores/..." format.
+  // Old "corpora/..." ids point to the deprecated Semantic Retrieval API and
+  // will cause 404s — drop them and create a fresh store.
+  if (tenant.apiKeys.geminiCorpusId?.startsWith('fileSearchStores/')) {
+    return tenant.apiKeys.geminiCorpusId;
+  }
   const ai = client(tenant);
   const store = await ai.fileSearchStores.create({
     config: { displayName: `tenant-${tenant.id}` },
