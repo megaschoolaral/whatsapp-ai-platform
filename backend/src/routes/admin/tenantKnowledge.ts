@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { prisma } from '../../prisma.js';
+import { logger } from '../../logger.js';
 import { requireAuth, requireRole } from '../../auth/middleware.js';
 import { loadTenantContext } from '../../services/tenantContext.js';
 import { ensureCorpus, uploadFileToCorpus, deleteFile } from '../../services/ai/rag.js';
@@ -43,13 +44,21 @@ adminTenantKnowledgeRouter.post('/', upload.single('file'), async (req, res) => 
     return;
   }
 
-  let corpusName = tenant.apiKeys.geminiCorpusId;
-  if (!corpusName) {
-    corpusName = await ensureCorpus(tenant);
-    await prisma.tenantApiKeys.update({
-      where: { tenantId: tenant.id },
-      data: { geminiCorpusId: corpusName },
-    });
+  let corpusName: string;
+  try {
+    corpusName = tenant.apiKeys.geminiCorpusId?.startsWith('fileSearchStores/')
+      ? tenant.apiKeys.geminiCorpusId
+      : await ensureCorpus(tenant);
+    if (corpusName !== tenant.apiKeys.geminiCorpusId) {
+      await prisma.tenantApiKeys.update({
+        where: { tenantId: tenant.id },
+        data: { geminiCorpusId: corpusName },
+      });
+    }
+  } catch (err) {
+    logger.error({ err, tenantId: tenant.id }, '[knowledge] ensureCorpus failed');
+    res.status(502).json({ error: `FileSearchStore creation failed: ${(err as Error).message}` });
+    return;
   }
 
   let geminiFileId: string | null = null;
@@ -67,6 +76,10 @@ adminTenantKnowledgeRouter.post('/', upload.single('file'), async (req, res) => 
   } catch (err) {
     indexingState = 'FAILED';
     indexingError = (err as Error).message;
+    logger.error(
+      { err, tenantId: tenant.id, filename: req.file.originalname, mimeType: req.file.mimetype, sizeBytes: req.file.size, corpusName },
+      '[knowledge] upload failed',
+    );
     res.status(502).json({ error: indexingError });
     return;
   }
