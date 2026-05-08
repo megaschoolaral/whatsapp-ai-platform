@@ -1,0 +1,21 @@
+{
+  "name": "whatsapp-ai-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=frontend && npm run build --workspace=backend",
+    "start": "npm run start --workspace=backend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "db:migrate:dev": "npm run db:migrate:dev --workspace=backend",
+    "db:migrate:deploy": "npm run db:migrate:deploy --workspace=backend",
+    "db:generate": "npm run db:generate --workspace=backend"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
