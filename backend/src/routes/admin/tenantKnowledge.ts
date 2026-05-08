@@ -53,6 +53,8 @@ adminTenantKnowledgeRouter.post('/', upload.single('file'), async (req, res) => 
   }
 
   let geminiFileId: string | null = null;
+  let indexingState = 'PENDING';
+  let indexingError: string | null = null;
   try {
     const result = await uploadFileToCorpus(
       tenant,
@@ -63,7 +65,9 @@ adminTenantKnowledgeRouter.post('/', upload.single('file'), async (req, res) => 
     );
     geminiFileId = result.fileId;
   } catch (err) {
-    res.status(502).json({ error: (err as Error).message });
+    indexingState = 'FAILED';
+    indexingError = (err as Error).message;
+    res.status(502).json({ error: indexingError });
     return;
   }
 
@@ -75,6 +79,8 @@ adminTenantKnowledgeRouter.post('/', upload.single('file'), async (req, res) => 
       mimeType: req.file.mimetype,
       geminiFileId,
       geminiCorpusId: corpusName,
+      indexingState,
+      indexingError,
       uploadedById: req.user!.userId,
     },
   });

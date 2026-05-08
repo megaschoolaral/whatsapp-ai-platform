@@ -1,111 +1,111 @@
-import { request } from 'undici';
+import { GoogleGenAI } from '@google/genai';
 import { logger } from '../../logger.js';
 import { logRagUsage } from './usageLog.js';
 import type { TenantContext } from '../tenantContext.js';
 
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-
 /**
- * Create a Gemini File Search corpus for a tenant.
- * Returns the corpus name (resource id).
+ * Gemini File Search Store integration.
+ *
+ * Per the current Gemini File Search API (Nov 2025+):
+ *  - Each tenant has a single FileSearchStore: "fileSearchStores/<id>"
+ *  - Files are uploaded into it via uploadToFileSearchStore (long-running op)
+ *  - To use it in generation, attach a `fileSearch` tool that references the
+ *    store; the model performs retrieval automatically and returns citations
+ *    in groundingMetadata.
+ *
+ * Docs: https://ai.google.dev/gemini-api/docs/file-search
  */
+
+function client(tenant: TenantContext): GoogleGenAI {
+  if (!tenant.apiKeys.gemini) throw new Error('Gemini key required');
+  return new GoogleGenAI({ apiKey: tenant.apiKeys.gemini });
+}
+
+/** Ensure a FileSearchStore exists for the tenant. Returns the store resource name. */
 export async function ensureCorpus(tenant: TenantContext): Promise<string> {
   if (tenant.apiKeys.geminiCorpusId) return tenant.apiKeys.geminiCorpusId;
-  if (!tenant.apiKeys.gemini) throw new Error('Gemini key required for RAG');
-
-  const res = await request(`${GEMINI_API_BASE}/corpora?key=${encodeURIComponent(tenant.apiKeys.gemini)}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ displayName: `tenant-${tenant.id}` }),
+  const ai = client(tenant);
+  const store = await ai.fileSearchStores.create({
+    config: { displayName: `tenant-${tenant.id}` },
   });
-  if (res.statusCode >= 300) {
-    const text = await res.body.text();
-    throw new Error(`Gemini corpus create failed: ${res.statusCode} ${text}`);
-  }
-  const json = (await res.body.json()) as { name?: string };
-  if (!json.name) throw new Error('Gemini corpus response missing name');
-  return json.name;
+  if (!store.name) throw new Error('FileSearchStore created without a name');
+  return store.name;
+}
+
+export interface UploadResult {
+  fileId: string;       // operation name to track indexing
+  storeName: string;
 }
 
 /**
- * Upload a file to the tenant's corpus.
- * fileBuffer: raw bytes; mimeType: e.g. 'application/pdf'.
+ * Upload a file to the tenant's FileSearchStore.
+ * Triggers a long-running indexing operation; the file is queryable once it
+ * completes (state = ACTIVE). UI can poll via getOperation if needed.
  */
 export async function uploadFileToCorpus(
   tenant: TenantContext,
-  corpusName: string,
+  storeName: string,
   filename: string,
   fileBuffer: Buffer,
   mimeType: string,
-): Promise<{ fileId: string }> {
-  if (!tenant.apiKeys.gemini) throw new Error('Gemini key required');
-  // Gemini File Search documents API
-  const url = `${GEMINI_API_BASE}/${corpusName}/documents?key=${encodeURIComponent(tenant.apiKeys.gemini)}`;
-  const res = await request(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      displayName: filename,
-      // Inline document content (base64). For larger files use resumable upload.
-      customMetadata: [{ key: 'mimeType', stringValue: mimeType }],
-      // The exact body shape depends on Gemini File Search version; this is the documented structure.
-    }),
+): Promise<UploadResult> {
+  const ai = client(tenant);
+  const blob = new Blob([new Uint8Array(fileBuffer)], { type: mimeType });
+  const op = await ai.fileSearchStores.uploadToFileSearchStore({
+    fileSearchStoreName: storeName,
+    file: blob,
+    config: { displayName: filename, mimeType },
   });
-  if (res.statusCode >= 300) {
-    const text = await res.body.text();
-    throw new Error(`Gemini document create failed: ${res.statusCode} ${text}`);
-  }
-  const json = (await res.body.json()) as { name?: string };
-  if (!json.name) throw new Error('Gemini doc response missing name');
-  // Note: actual chunk indexing happens via separate API call in newer Gemini File Search.
-  // This is a simplified path — see Gemini docs for full multipart upload flow.
-  void fileBuffer;
-  return { fileId: json.name };
+  const id =
+    (op as { name?: string }).name ??
+    ((op as { metadata?: { documentName?: string } }).metadata?.documentName ?? null);
+  if (!id) throw new Error('uploadToFileSearchStore returned no name');
+  return { fileId: id, storeName };
 }
 
 export async function deleteFile(tenant: TenantContext, fileResourceName: string): Promise<void> {
-  if (!tenant.apiKeys.gemini) throw new Error('Gemini key required');
-  const url = `${GEMINI_API_BASE}/${fileResourceName}?key=${encodeURIComponent(tenant.apiKeys.gemini)}`;
-  await request(url, { method: 'DELETE' });
+  const ai = client(tenant);
+  try {
+    // The resource name is "fileSearchStores/<store>/documents/<doc>"
+    await ai.fileSearchStores.documents.delete({ name: fileResourceName });
+  } catch (err) {
+    logger.warn({ err, fileResourceName }, '[rag] delete failed');
+  }
 }
 
 /**
- * Query the corpus and return concatenated relevant snippets.
+ * Run Gemini grounded generation against the tenant's FileSearchStore and
+ * return the synthesized retrieval text. We use this when the tenant's main
+ * text model (e.g. Grok/OpenAI) can't natively call Gemini's file_search tool
+ * — Gemini does the retrieval, we forward the answer as context.
  */
 export async function queryCorpus(
   tenant: TenantContext,
   query: string,
   conversationId?: string | null,
 ): Promise<string> {
-  if (!tenant.apiKeys.gemini || !tenant.apiKeys.geminiCorpusId) return '';
+  if (!tenant.apiKeys.geminiCorpusId || !tenant.apiKeys.gemini) return '';
   try {
-    const url = `${GEMINI_API_BASE}/${tenant.apiKeys.geminiCorpusId}:query?key=${encodeURIComponent(
-      tenant.apiKeys.gemini,
-    )}`;
-    const res = await request(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query, resultsCount: 5 }),
+    const ai = client(tenant);
+    const result = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: query,
+      config: {
+        tools: [{ fileSearch: { fileSearchStoreNames: [tenant.apiKeys.geminiCorpusId] } }],
+        systemInstruction:
+          'You are a retrieval helper. Reply with relevant facts from the knowledge base only, ' +
+          'no commentary. If nothing relevant, reply with the empty string.',
+      },
     });
-    if (res.statusCode >= 300) {
-      logger.warn({ status: res.statusCode }, '[rag] query failed');
-      return '';
-    }
-    const json = (await res.body.json()) as {
-      relevantChunks?: Array<{ chunk?: { data?: { stringValue?: string } } }>;
-    };
-    const chunks = (json.relevantChunks ?? [])
-      .map((c) => c.chunk?.data?.stringValue)
-      .filter(Boolean) as string[];
-    const combined = chunks.join('\n---\n');
+    const text = result.text ?? '';
     await logRagUsage({
       tenantId: tenant.id,
       inputTokens: Math.ceil(query.length / 4),
       conversationId: conversationId ?? null,
     });
-    return combined;
+    return text;
   } catch (err) {
-    logger.warn({ err }, '[rag] query exception');
+    logger.warn({ err }, '[rag] queryCorpus failed');
     return '';
   }
 }

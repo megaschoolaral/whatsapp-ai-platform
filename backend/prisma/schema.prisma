@@ -125,16 +125,21 @@ model WhatsappSession {
 }
 
 model KnowledgeFile {
-  id                String   @id @default(uuid())
-  tenantId          String
-  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  filename          String
-  fileSizeBytes     Int
-  mimeType          String?
-  geminiFileId      String?
-  geminiCorpusId    String?
-  uploadedById      String?
-  createdAt         DateTime @default(now())
+  id                  String   @id @default(uuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  filename            String
+  fileSizeBytes       Int
+  mimeType            String?
+  /// File Search Store doc resource name (e.g. "fileSearchStores/abc/documents/xyz")
+  geminiFileId        String?
+  /// File Search Store resource name (e.g. "fileSearchStores/abc")
+  geminiCorpusId      String?
+  /// Tracks indexing state — "PENDING" | "ACTIVE" | "FAILED"
+  indexingState       String   @default("PENDING")
+  indexingError       String?
+  uploadedById        String?
+  createdAt           DateTime @default(now())
 
   @@index([tenantId])
 }

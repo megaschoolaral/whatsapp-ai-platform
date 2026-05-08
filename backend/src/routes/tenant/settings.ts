@@ -179,7 +179,13 @@ tenantSettingsRouter.post('/knowledge', upload.single('file'), async (req, res) 
       data: { geminiCorpusId: corpus },
     });
   }
-  const result = await uploadFileToCorpus(tenant, corpus, req.file.originalname, req.file.buffer, req.file.mimetype);
+  let result;
+  try {
+    result = await uploadFileToCorpus(tenant, corpus, req.file.originalname, req.file.buffer, req.file.mimetype);
+  } catch (err) {
+    res.status(502).json({ error: (err as Error).message });
+    return;
+  }
   const saved = await prisma.knowledgeFile.create({
     data: {
       tenantId: tenant.id,
@@ -188,6 +194,7 @@ tenantSettingsRouter.post('/knowledge', upload.single('file'), async (req, res) 
       mimeType: req.file.mimetype,
       geminiFileId: result.fileId,
       geminiCorpusId: corpus,
+      indexingState: 'PENDING',
       uploadedById: req.user!.userId,
     },
   });
