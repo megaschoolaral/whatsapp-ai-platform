@@ -78,7 +78,7 @@ export async function extendBufferTimer(
 }
 
 async function scheduleFlush(tenantId: string, jid: string, delayMs: number): Promise<void> {
-  const jobId = `${tenantId}:${jid}`;
+  const jobId = `${tenantId}__${jid.replace(/:/g, '_')}`;
   // Remove existing job to keep only the latest timer
   try {
     const existing = await inboundFlushQueue.getJob(jobId);
@@ -115,7 +115,7 @@ export async function dropBuffer(tenantId: string, jid: string): Promise<void> {
   const k = bufferKey(tenantId, jid);
   const meta = metaKey(tenantId, jid);
   await redis.del(k, meta);
-  const jobId = `${tenantId}:${jid}`;
+  const jobId = `${tenantId}__${jid.replace(/:/g, '_')}`;
   try {
     const existing = await inboundFlushQueue.getJob(jobId);
     if (existing) await existing.remove();
