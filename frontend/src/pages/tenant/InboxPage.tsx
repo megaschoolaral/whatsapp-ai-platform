@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { apiRequest } from '@/lib/api';
 import { connectSocket, disconnectSocket } from '@/lib/socket';
@@ -27,6 +27,13 @@ interface Message {
   createdAt: string;
 }
 
+const STATUS_LABEL: Record<Conversation['status'], string> = {
+  awaiting_human: 'нужен оператор',
+  human_active: 'оператор',
+  ai_active: 'AI',
+  resolved: 'решён',
+};
+
 export function InboxPage() {
   const token = useAuthStore((s) => s.token);
   const tenantId = useAuthStore((s) => s.user?.tenantId);
@@ -36,6 +43,7 @@ export function InboxPage() {
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [reply, setReply] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadConversations = async () => {
     const data = await apiRequest<Conversation[]>('/tenant/conversations', {
@@ -67,6 +75,10 @@ export function InboxPage() {
   useEffect(() => {
     if (activeId) loadMessages(activeId);
   }, [activeId]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const sendReply = async () => {
     if (!activeId || !reply.trim()) return;
@@ -101,20 +113,30 @@ export function InboxPage() {
     await loadConversations();
   };
 
+  // Layout: on md+ side-by-side. On mobile show only one panel at a time.
+  // Use available viewport: header (3.5rem) + page padding (~2rem).
+  const containerHeight = 'h-[calc(100vh-7rem)]';
+
   return (
-    <div className="grid grid-cols-12 gap-4 h-[calc(100vh-8rem)]">
-      <div className="col-span-12 md:col-span-4 border rounded-lg bg-white overflow-hidden flex flex-col">
-        <div className="p-3 border-b flex items-center gap-2">
+    <div className={cn('grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4', containerHeight)}>
+      {/* List panel */}
+      <div
+        className={cn(
+          'md:col-span-4 border rounded-lg bg-white overflow-hidden flex flex-col',
+          activeId ? 'hidden md:flex' : 'flex',
+        )}
+      >
+        <div className="p-2 sm:p-3 border-b flex items-center gap-2">
           <select
-            className="h-9 rounded border px-2 text-sm"
+            className="h-9 rounded border px-2 text-sm flex-1 min-w-0"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="">Все</option>
-            <option value="awaiting_human">Awaiting human</option>
-            <option value="human_active">Human active</option>
-            <option value="ai_active">AI active</option>
-            <option value="resolved">Resolved</option>
+            <option value="awaiting_human">Нужен оператор</option>
+            <option value="human_active">Оператор ведёт</option>
+            <option value="ai_active">AI</option>
+            <option value="resolved">Решены</option>
           </select>
           <Button size="sm" variant="outline" onClick={loadConversations}>
             ↻
@@ -127,12 +149,12 @@ export function InboxPage() {
               key={c.id}
               onClick={() => setActiveId(c.id)}
               className={cn(
-                'w-full text-left border-b p-3 hover:bg-slate-50',
+                'w-full text-left border-b p-3 hover:bg-slate-50 transition-colors',
                 activeId === c.id && 'bg-slate-100',
               )}
             >
-              <div className="flex items-center justify-between">
-                <div className="font-medium truncate">{c.contactName ?? c.contactIdentifier}</div>
+              <div className="flex items-start justify-between gap-2">
+                <div className="font-medium truncate text-sm">{c.contactName ?? c.contactIdentifier}</div>
                 <Badge
                   variant={
                     c.status === 'awaiting_human'
@@ -143,64 +165,92 @@ export function InboxPage() {
                           ? 'success'
                           : 'default'
                   }
+                  className="shrink-0"
                 >
-                  {c.status}
+                  {STATUS_LABEL[c.status]}
                 </Badge>
               </div>
-              <div className="text-xs text-slate-500">{new Date(c.lastMessageAt).toLocaleString('ru-RU')}</div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                {new Date(c.lastMessageAt).toLocaleString('ru-RU', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  day: '2-digit',
+                  month: '2-digit',
+                })}
+              </div>
             </button>
           ))}
         </div>
       </div>
 
-      <div className="col-span-12 md:col-span-8 border rounded-lg bg-white flex flex-col">
+      {/* Chat panel */}
+      <div
+        className={cn(
+          'md:col-span-8 border rounded-lg bg-white flex-col',
+          activeId ? 'flex' : 'hidden md:flex',
+        )}
+      >
         {!activeConv ? (
-          <div className="m-auto text-slate-500">Выберите разговор</div>
+          <div className="m-auto text-slate-500 hidden md:block">Выберите разговор</div>
         ) : (
           <>
-            <div className="p-3 border-b flex items-center justify-between">
-              <div>
-                <div className="font-medium">{activeConv.contactName ?? activeConv.contactIdentifier}</div>
-                <div className="text-xs text-slate-500">{activeConv.contactIdentifier}</div>
+            <div className="p-2 sm:p-3 border-b flex items-center gap-2">
+              {/* Back button — mobile only */}
+              <button
+                type="button"
+                className="md:hidden inline-flex items-center justify-center h-9 w-9 rounded-md border border-slate-300 hover:bg-slate-50 shrink-0"
+                onClick={() => setActiveId(null)}
+                aria-label="Назад"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium truncate text-sm sm:text-base">
+                  {activeConv.contactName ?? activeConv.contactIdentifier}
+                </div>
+                <div className="text-xs text-slate-500 truncate">{activeConv.contactIdentifier}</div>
               </div>
-              <div className="flex gap-2">
-                {activeConv.status !== 'human_active' && (
+              <div className="flex gap-1 sm:gap-2 shrink-0">
+                {activeConv.status !== 'human_active' ? (
                   <Button size="sm" variant="outline" onClick={takeOver}>
-                    Взять на себя
+                    Взять
                   </Button>
-                )}
-                {activeConv.status === 'human_active' && (
+                ) : (
                   <Button size="sm" variant="outline" onClick={returnToAi}>
-                    Вернуть AI
+                    AI
                   </Button>
                 )}
                 <Button size="sm" variant="ghost" onClick={resolve}>
-                  Resolve
+                  ✓
                 </Button>
               </div>
             </div>
-            <div className="flex-1 overflow-auto p-4 space-y-2">
+            <div className="flex-1 overflow-auto p-3 sm:p-4 space-y-2">
               {messages.map((m) => (
                 <div
                   key={m.id}
                   className={cn(
-                    'max-w-[75%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap',
-                    m.direction === 'outgoing'
-                      ? 'ml-auto bg-emerald-100'
-                      : 'mr-auto bg-slate-100',
+                    'max-w-[85%] sm:max-w-[75%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words',
+                    m.direction === 'outgoing' ? 'ml-auto bg-emerald-100' : 'mr-auto bg-slate-100',
                   )}
                 >
                   <div>{m.transcribedText ?? m.content ?? `[${m.mediaType ?? 'media'}]`}</div>
                   <div className="text-[10px] text-slate-500 mt-1">
                     {m.sentBy === 'ai' ? 'AI' : m.sentBy === 'customer' ? 'клиент' : 'оператор'} ·{' '}
-                    {new Date(m.createdAt).toLocaleTimeString('ru-RU')}
+                    {new Date(m.createdAt).toLocaleTimeString('ru-RU', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
                   </div>
                 </div>
               ))}
+              <div ref={messagesEndRef} />
             </div>
-            <div className="border-t p-3 flex gap-2">
+            <div className="border-t p-2 sm:p-3 flex gap-2">
               <Input
-                placeholder="Ответ оператора..."
+                placeholder="Сообщение..."
                 value={reply}
                 onChange={(e) => setReply(e.target.value)}
                 onKeyDown={(e) => {
