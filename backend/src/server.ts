@@ -32,8 +32,10 @@ const __dirname = path.dirname(__filename);
 
 function buildApp(): Express {
   const app = express();
+  app.set('trust proxy', 1);
   app.use(helmet({ contentSecurityPolicy: false }));
-  app.use(cors({ origin: true, credentials: true }));
+  const corsOrigin = env.NODE_ENV === 'production' ? env.APP_URL : true;
+  app.use(cors({ origin: corsOrigin, credentials: true }));
   app.use(express.json({ limit: '5mb' }));
 
   app.use('/api', healthRouter);
@@ -69,16 +71,19 @@ async function main() {
   const app = buildApp();
   const server = http.createServer(app);
 
+  const ioCorsOrigin = env.NODE_ENV === 'production' ? env.APP_URL : true;
   const io = new SocketServer(server, {
-    cors: { origin: true, credentials: true },
+    cors: { origin: ioCorsOrigin, credentials: true },
   });
   io.use((socket, next) => {
     try {
       const token = (socket.handshake.auth?.token as string | undefined) ?? '';
       if (!token) return next(new Error('Unauthorized'));
       const payload = verifyToken(token);
-      const tenantId = payload.tenantId ?? (socket.handshake.query.tenantId as string | undefined);
-      if (payload.role === 'tenant_admin' && tenantId) socket.join(`tenant-${tenantId}`);
+      socket.data.user = payload;
+      if (payload.role === 'tenant_admin' && payload.tenantId) {
+        socket.join(`tenant-${payload.tenantId}`);
+      }
       if (payload.role === 'super_admin') {
         const queryTenant = socket.handshake.query.tenantId as string | undefined;
         if (queryTenant) socket.join(`tenant-${queryTenant}`);
@@ -90,7 +95,9 @@ async function main() {
   });
   io.on('connection', (socket) => {
     socket.on('subscribe:tenant', (tenantId: string) => {
-      // super-admin only — controlled client-side; rooms broadcast tenant data
+      const user = socket.data.user as { role?: string } | undefined;
+      if (user?.role !== 'super_admin') return;
+      if (typeof tenantId !== 'string' || !tenantId) return;
       socket.join(`tenant-${tenantId}`);
     });
   });

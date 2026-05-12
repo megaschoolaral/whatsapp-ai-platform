@@ -11,6 +11,11 @@ export async function bootstrapSuperAdmin(): Promise<void> {
     logger.warn('[bootstrap] No super_admin in DB and SUPER_ADMIN_EMAIL/PASSWORD env not set. Skipping bootstrap.');
     return;
   }
+  const placeholders = new Set(['change_me_immediately', 'changeme', 'password', 'admin']);
+  if (placeholders.has(env.SUPER_ADMIN_PASSWORD) || env.SUPER_ADMIN_PASSWORD.length < 12) {
+    logger.error('[bootstrap] SUPER_ADMIN_PASSWORD is a placeholder or too short (<12 chars). Refusing to create super-admin. Set a strong password and restart.');
+    return;
+  }
   const passwordHash = await hashPassword(env.SUPER_ADMIN_PASSWORD);
   await prisma.user.create({
     data: {
@@ -18,7 +23,7 @@ export async function bootstrapSuperAdmin(): Promise<void> {
       passwordHash,
       role: 'super_admin',
       isActive: true,
-      mustChangePassword: false,
+      mustChangePassword: true,
     },
   });
   logger.info('[bootstrap] Super-admin created. Remove SUPER_ADMIN_PASSWORD env var now.');

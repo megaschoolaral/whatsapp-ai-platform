@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { prisma } from '../prisma.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
@@ -7,9 +8,25 @@ import { requireAuth } from '../auth/middleware.js';
 
 export const authRouter = Router();
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Try again later.' },
+});
+
+const sensitiveLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Try again later.' },
+});
+
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 
-authRouter.post('/login', async (req, res) => {
+authRouter.post('/login', loginLimiter, async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid input' });
@@ -57,7 +74,7 @@ authRouter.get('/me', requireAuth, async (req, res) => {
 });
 
 const changePwSchema = z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(8) });
-authRouter.post('/change-password', requireAuth, async (req, res) => {
+authRouter.post('/change-password', sensitiveLimiter, requireAuth, async (req, res) => {
   const parsed = changePwSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid input' });
