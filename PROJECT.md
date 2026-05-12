@@ -823,7 +823,7 @@ Super-admin (студент) видит то же самое **across all tenant
 // Table: tenants
 {
   id: uuid (PK)
-  name: string                    // 'Acme Cafe', 'Acme Weddings'
+  name: string                    // 'Acme Print', 'Acme Weddings'
   status: 'active' | 'suspended' | 'pending_setup'
   owner_user_id: uuid (FK to users)  // tenant_admin для этого тенанта
   ai_persona: text                // editable system prompt (см. AI Persona)
@@ -1163,7 +1163,7 @@ Onboarding нового тенанта — это процесс который 
 Не делать линейный wizard "Step 1 → Step 2 → Step 3". Делать checklist:
 
 ```
-┌─ Onboarding: Acme Cafe ────────────────────┐
+┌─ Onboarding: Acme Cafe ────────────────────────┐
 │ Status: pending_setup                          │
 │ Progress: 5 / 7 steps                          │
 │                                                │
@@ -1221,7 +1221,7 @@ Onboarding нового тенанта — это процесс который 
 ```
 ┌─ AI Persona (System Prompt) ───────────────────┐
 │ ┌────────────────────────────────────────────┐ │
-│ │ Ты — менеджер кафе "Acme Cafe".        │ │
+│ │ Ты — менеджер кафе "Acme Cafe".            │ │
 │ │ Отвечай дружелюбно, на русском или         │ │
 │ │ казахском (зависит от языка клиента).      │ │
 │ │ Часы работы: 8:00-22:00.                   │ │
