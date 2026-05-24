@@ -72,12 +72,21 @@ export async function connectTenant(tenantId: string): Promise<void> {
 
       switch (reason) {
         case DisconnectReason.loggedOut:
-        case DisconnectReason.connectionReplaced:
         case DisconnectReason.badSession:
         case DisconnectReason.multideviceMismatch:
           // Do not auto-reconnect — manual re-auth required
           removeSession(tenantId);
           return;
+        case DisconnectReason.connectionReplaced: {
+          // Another connection replaced ours — wait and reconnect
+          removeSession(tenantId);
+          const replaceDelay = 8000 + Math.floor(Math.random() * 4000);
+          logger.warn({ tenantId, replaceDelay }, '[whatsapp] connection replaced, reconnecting after delay');
+          setTimeout(() => {
+            connectTenant(tenantId).catch((err) => logger.error({ err }, '[whatsapp] reconnect after replaced failed'));
+          }, replaceDelay);
+          return;
+        }
         default: {
           // Reconnect with backoff
           removeSession(tenantId);
