@@ -46,6 +46,12 @@ export async function flushBuffer(tenantId: string, jid: string): Promise<void> 
     }))
     .filter((t) => t.content);
 
+  // If no text and no image (e.g. sticker, reaction, audio without STT) — skip silently
+  if (!combinedText.trim() && !lastImage) {
+    logger.warn({ tenantId, jid }, '[flush] no text or image content, skipping AI');
+    return;
+  }
+
   // Pre-handoff check by user content
   const handoff = shouldHandoff(combinedText);
   if (handoff.handoff) {
