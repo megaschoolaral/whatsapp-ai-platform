@@ -9,7 +9,7 @@ import { prisma } from '../../prisma.js';
 import { makeDbAuthState } from './sessionStore.js';
 import { setSession, updateSession, getSession, removeSession } from './manager.js';
 import { emitToTenant } from '../realtime/socketRooms.js';
-import { handleIncomingMessage } from './inbound.js';
+import { handleIncomingMessage, handleOutgoingFromPhone } from './inbound.js';
 import { handlePresenceUpdate } from './presence.js';
 
 export async function connectTenant(tenantId: string): Promise<void> {
@@ -102,7 +102,13 @@ export async function connectTenant(tenantId: string): Promise<void> {
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     for (const m of messages) {
-      if (m.key.fromMe) continue;
+      if (m.key.fromMe) {
+        // Оператор телефоннан қолмен жазды → ботты тоқтат
+        handleOutgoingFromPhone(tenantId, m).catch((err) =>
+          logger.error({ err, tenantId }, '[whatsapp] outgoing-from-phone handler error'),
+        );
+        continue;
+      }
       try {
         await handleIncomingMessage(tenantId, sock, m);
       } catch (err) {

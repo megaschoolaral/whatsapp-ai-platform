@@ -8,6 +8,7 @@ import { appendToBuffer } from '../inboundBuffer/buffer.js';
 import { transcribe } from '../stt/index.js';
 import { loadTenantContext } from '../tenantContext.js';
 import { emitToTenant } from '../realtime/socketRooms.js';
+import { setStatus } from '../conversations/stateMachine.js';
 
 type Sock = ReturnType<typeof makeWASocket>;
 
@@ -30,6 +31,24 @@ function detectMediaType(msg: WAMessage): 'image' | 'audio' | 'document' | null 
   if (m.audioMessage) return 'audio';
   if (m.documentMessage) return 'document';
   return null;
+}
+
+/**
+ * Оператор WhatsApp телефонынан қолмен хабарлама жіберді.
+ * Егер conversation ai_active болса → human_active-ке ауыстыр (бот тоқтайды).
+ */
+export async function handleOutgoingFromPhone(tenantId: string, msg: WAMessage): Promise<void> {
+  const jid = msg.key.remoteJid;
+  if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return;
+
+  const conversation = await prisma.conversation.findFirst({
+    where: { tenantId, contactIdentifier: jid, status: 'ai_active' },
+  });
+  if (!conversation) return; // Уже human_active / awaiting_human — ничего не делаем
+
+  await setStatus(conversation.id, 'human_active', {});
+  logger.info({ tenantId, jid }, '[inbound] operator sent from phone → human_active, bot stopped');
+  emitToTenant(tenantId, 'conversation:updated', { conversationId: conversation.id, status: 'human_active' });
 }
 
 export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: WAMessage): Promise<void> {
