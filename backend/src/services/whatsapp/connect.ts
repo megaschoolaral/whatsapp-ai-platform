@@ -50,13 +50,25 @@ export async function connectTenant(tenantId: string): Promise<void> {
           lastDisconnectReason: null,
         },
       });
-      // Start warmup timer if first connection
-      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-      if (tenant && !tenant.warmupStartedAt) {
-        await prisma.tenant.update({
-          where: { id: tenantId },
-          data: { warmupStartedAt: new Date() },
-        });
+      // Start warmup timer + auto-activate if all prerequisites are met
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        include: { apiKeys: true },
+      });
+      if (tenant) {
+        const updates: Record<string, unknown> = {};
+        if (!tenant.warmupStartedAt) updates.warmupStartedAt = new Date();
+        if (
+          tenant.status === 'pending_setup' &&
+          tenant.apiKeys?.geminiKey &&
+          tenant.aiPersona?.trim()
+        ) {
+          updates.status = 'active';
+          logger.info({ tenantId }, '[whatsapp] auto-activated tenant on connect');
+        }
+        if (Object.keys(updates).length) {
+          await prisma.tenant.update({ where: { id: tenantId }, data: updates });
+        }
       }
       emitToTenant(tenantId, 'whatsapp:status', { tenantId, status: 'connected' });
     }
