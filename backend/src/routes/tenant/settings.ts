@@ -7,7 +7,7 @@ import { encrypt, decrypt, maskKey } from '../../crypto/aesGcm.js';
 import { MODEL_PRICING, getTextModel, getVisionModel, getSttModel } from '../../config/model-pricing.js';
 import { loadTenantContext } from '../../services/tenantContext.js';
 import { ensureCorpus, uploadFileToCorpus, deleteFile } from '../../services/ai/rag.js';
-import { connectTenant, disconnectTenant } from '../../services/whatsapp/connect.js';
+import { connectTenant, disconnectTenant, resetTenantSession } from '../../services/whatsapp/connect.js';
 import { getSession } from '../../services/whatsapp/manager.js';
 
 export const tenantSettingsRouter = Router();
@@ -239,12 +239,14 @@ tenantSettingsRouter.get('/whatsapp/status', async (req, res) => {
   const persisted = await prisma.whatsappSession.findUnique({ where: { tenantId: req.tenantScope! } });
   res.json({
     status: live?.status ?? persisted?.status ?? 'disconnected',
+    qr: live?.lastQr ?? null,
     phoneNumber: persisted?.phoneNumber ?? null,
     lastConnectedAt: persisted?.lastConnectedAt ?? null,
   });
 });
 tenantSettingsRouter.post('/whatsapp/reconnect', async (req, res) => {
-  await disconnectTenant(req.tenantScope!).catch(() => undefined);
+  // Wipe stored creds so Baileys generates a fresh QR instead of trying to resume an invalidated session
+  await resetTenantSession(req.tenantScope!).catch(() => undefined);
   await connectTenant(req.tenantScope!);
   res.json({ ok: true });
 });

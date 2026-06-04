@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import QRCode from 'qrcode';
 import { apiRequest } from '@/lib/api';
+import { connectSocket, disconnectSocket } from '@/lib/socket';
+import { useAuthStore } from '@/stores/authStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -288,16 +291,49 @@ export function UsagePage() {
 
 // CHANNEL STATUS
 export function ChannelStatusPage() {
-  const [status, setStatus] = useState<{ status: string; phoneNumber: string | null; lastConnectedAt: string | null } | null>(null);
-  const refresh = () => apiRequest<typeof status>('/tenant/whatsapp/status').then(setStatus);
+  type WaStatus = { status: string; qr: string | null; phoneNumber: string | null; lastConnectedAt: string | null };
+  const token = useAuthStore((s) => s.token);
+  const [status, setStatus] = useState<WaStatus | null>(null);
+  const [qrSvg, setQrSvg] = useState<string | null>(null);
+
+  const refresh = async () => {
+    const s = await apiRequest<WaStatus>('/tenant/whatsapp/status');
+    setStatus(s);
+    if (s.qr) {
+      const svg = await QRCode.toString(s.qr, { type: 'svg', width: 280 });
+      setQrSvg(svg);
+    } else {
+      setQrSvg(null);
+    }
+  };
+
   useEffect(() => {
     refresh();
+    if (!token) return;
+    const sock = connectSocket(token);
+    sock.on('whatsapp:status', async (payload: { status: string; qr?: string }) => {
+      if (payload.qr) {
+        const svg = await QRCode.toString(payload.qr, { type: 'svg', width: 280 });
+        setQrSvg(svg);
+      }
+      if (payload.status === 'connected') {
+        setQrSvg(null);
+      }
+      await refresh();
+    });
+    return () => disconnectSocket();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const reconnect = async () => {
-    await apiRequest('/tenant/whatsapp/reconnect', { method: 'POST' });
-    toast.info('Запущено переподключение. Зайдите к super-admin для скана QR.');
-    setTimeout(refresh, 1500);
+
+  const connect = async () => {
+    try {
+      await apiRequest('/tenant/whatsapp/reconnect', { method: 'POST' });
+      toast.info('Подключение запущено, ожидаем QR…');
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
   };
+
   return (
     <Card>
       <CardHeader>
@@ -305,12 +341,20 @@ export function ChannelStatusPage() {
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex items-center gap-3">
-          <Badge variant={status?.status === 'connected' ? 'success' : 'warning'}>{status?.status ?? '—'}</Badge>
+          <Badge variant={status?.status === 'connected' ? 'success' : status?.status === 'qr' ? 'warning' : 'default'}>
+            {status?.status ?? '—'}
+          </Badge>
           {status?.phoneNumber && <span className="text-sm text-slate-500">{status.phoneNumber}</span>}
         </div>
-        <Button onClick={reconnect} variant="outline">
-          Переподключить
+        <Button onClick={connect} variant="outline">
+          {status?.status === 'connected' ? 'Переподключить' : 'Подключить (показать QR)'}
         </Button>
+        {qrSvg && (
+          <div className="border rounded-lg p-4 inline-block bg-white">
+            <div className="text-sm font-medium mb-2">Отсканируйте QR через WhatsApp → Связанные устройства</div>
+            <div dangerouslySetInnerHTML={{ __html: qrSvg }} />
+          </div>
+        )}
         {status?.lastConnectedAt && (
           <div className="text-xs text-slate-500">
             Последнее подключение: {new Date(status.lastConnectedAt).toLocaleString('ru-RU')}
