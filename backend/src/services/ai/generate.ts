@@ -29,6 +29,7 @@ function systemMessage(tenant: TenantContext, ragContext: string): string {
   const now = new Date().toLocaleString('ru-RU', { timeZone: tenant.timezone });
   let sys = tenant.aiPersona || 'You are a helpful assistant for a small business.';
   sys += `\n\nCurrent time: ${now}\nTimezone: ${tenant.timezone}`;
+  sys += `\n\nIMPORTANT RULE: Never ask the client questions. Only answer what they ask. If the client's message is unclear, give the most helpful answer you can based on what you know — do not ask clarifying questions back.`;
   if (ragContext) {
     sys += `\n\nRelevant info from knowledge base (use only if relevant):\n${ragContext}`;
   }

@@ -45,6 +45,10 @@ export async function apiRequest<T = unknown>(path: string, opts: RequestOptions
     parsed = text;
   }
   if (!res.ok) {
+    if (res.status === 401) {
+      useAuthStore.getState().logout();
+      window.location.href = '/login';
+    }
     throw new ApiError(res.status, (parsed as { error?: string })?.error ?? `HTTP ${res.status}`, parsed);
   }
   return parsed as T;

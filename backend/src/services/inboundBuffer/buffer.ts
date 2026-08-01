@@ -105,7 +105,7 @@ export async function readAndClearBuffer(
 
   const items = await redis.lrange(k, 0, -1);
   const conversationId = await redis.hget(meta, 'conversationId');
-  await redis.del(k, meta);
+  await redis.del(k, meta, lockKey);
 
   const parsed = items.map((s: string) => JSON.parse(s) as BufferedMessage);
   return { messages: parsed, conversationId };

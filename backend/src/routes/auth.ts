@@ -33,12 +33,10 @@ authRouter.post('/login', loginLimiter, async (req, res) => {
     return;
   }
   const user = await prisma.user.findUnique({ where: { email: parsed.data.email } });
-  if (!user || !user.isActive) {
-    res.status(401).json({ error: 'Invalid credentials' });
-    return;
-  }
-  const ok = await verifyPassword(parsed.data.password, user.passwordHash);
-  if (!ok) {
+  // Always run bcrypt to prevent timing-based email enumeration (valid 60-char hash required)
+  const sentinel = '$2a$10$/3SK7iTsoZElmbaksQrSpOwlBQhONzGmFRP3eaIS195TcIjdM5U.u';
+  const ok = await verifyPassword(parsed.data.password, user?.passwordHash ?? sentinel);
+  if (!user || !user.isActive || !ok) {
     res.status(401).json({ error: 'Invalid credentials' });
     return;
   }

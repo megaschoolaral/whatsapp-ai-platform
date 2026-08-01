@@ -14,7 +14,7 @@ export async function flushBuffer(tenantId: string, jid: string): Promise<void> 
   const { messages, conversationId } = await readAndClearBuffer(tenantId, jid);
   if (!messages.length || !conversationId) return;
 
-  const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } });
+  const conversation = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId } });
   if (!conversation) return;
   if (conversation.status === 'human_active' || conversation.status === 'awaiting_human') {
     return; // human took over while buffering
@@ -39,7 +39,7 @@ export async function flushBuffer(tenantId: string, jid: string): Promise<void> 
   // History from DB (excluding the messages we just stored — they'll be in DB already as incoming)
   const dbHistory = await getConversationHistory(conversationId, 30);
   const history: ChatTurn[] = dbHistory
-    .slice(0, -1) // last one is the most recent incoming, will be supplied as userMessage
+    .slice(0, -messages.length) // all buffered messages are in DB; exclude them from history to avoid duplicating in AI prompt
     .map((m) => ({
       role: m.direction === 'incoming' ? ('user' as const) : ('assistant' as const),
       content: m.transcribedText ?? m.content ?? '',
@@ -56,7 +56,6 @@ export async function flushBuffer(tenantId: string, jid: string): Promise<void> 
   const handoff = shouldHandoff(combinedText);
   if (handoff.handoff) {
     await setStatus(conversationId, 'awaiting_human', { handoffReason: handoff.reason });
-    emitToTenant(tenantId, 'conversation:updated', { conversationId, status: 'awaiting_human' });
     return;
   }
 

@@ -48,7 +48,6 @@ export async function handleOutgoingFromPhone(tenantId: string, msg: WAMessage):
 
   await setStatus(conversation.id, 'human_active', {});
   logger.info({ tenantId, jid }, '[inbound] operator sent from phone → human_active, bot stopped');
-  emitToTenant(tenantId, 'conversation:updated', { conversationId: conversation.id, status: 'human_active' });
 }
 
 export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: WAMessage): Promise<void> {

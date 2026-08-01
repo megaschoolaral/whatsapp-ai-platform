@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { requireAuth, requireRole } from '../../auth/middleware.js';
@@ -101,7 +102,15 @@ adminTenantKeysRouter.put('/', async (req, res) => {
   res.json(view);
 });
 
-adminTenantKeysRouter.post('/reveal/:field', async (req, res) => {
+const revealLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many reveal requests. Try again later.' },
+});
+
+adminTenantKeysRouter.post('/reveal/:field', revealLimiter, async (req, res) => {
   const field = (req.params as Record<string,string>).field as FieldName;
   if (!fields.includes(field)) {
     res.status(400).json({ error: 'Unknown field' });
