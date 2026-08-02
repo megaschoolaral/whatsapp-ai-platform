@@ -90,13 +90,15 @@ export async function connectTenant(tenantId: string): Promise<void> {
           removeSession(tenantId);
           return;
         case DisconnectReason.connectionReplaced: {
-          // Another connection replaced ours — wait and reconnect
+          // Another connection replaced ours — stop reconnecting to avoid infinite conflict loop.
+          // User must manually reconnect from the dashboard.
           removeSession(tenantId);
-          const replaceDelay = 8000 + Math.floor(Math.random() * 4000);
-          logger.warn({ tenantId, replaceDelay }, '[whatsapp] connection replaced, reconnecting after delay');
-          setTimeout(() => {
-            connectTenant(tenantId).catch((err) => logger.error({ err }, '[whatsapp] reconnect after replaced failed'));
-          }, replaceDelay);
+          logger.warn({ tenantId }, '[whatsapp] connection replaced — stopping auto-reconnect, manual reconnect required');
+          await prisma.whatsappSession.update({
+            where: { tenantId },
+            data: { status: 'disconnected', lastDisconnectReason: 'connection_replaced' },
+          }).catch(() => undefined);
+          emitToTenant(tenantId, 'whatsapp:status', { tenantId, status: 'disconnected', reason: 'connection_replaced' });
           return;
         }
         default: {
