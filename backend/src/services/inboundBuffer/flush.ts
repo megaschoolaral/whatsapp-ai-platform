@@ -70,8 +70,10 @@ export async function flushBuffer(tenantId: string, jid: string): Promise<void> 
       conversationId,
     });
   } catch (err) {
-    logger.error({ err, tenantId }, '[flush] generateReply failed');
-    await setStatus(conversationId, 'awaiting_human', { handoffReason: 'ai_error' });
+    logger.error({ err, tenantId }, '[flush] generateReply failed — staying ai_active for retry');
+    // Do NOT move to awaiting_human on transient AI errors (bad API key, quota, network).
+    // The conversation stays ai_active so the next customer message triggers a fresh attempt.
+    // Only hand off permanently if the operator explicitly takes over.
     return;
   }
 
