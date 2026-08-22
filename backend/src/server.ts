@@ -50,9 +50,12 @@ function buildApp(): Express {
   app.use('/api/admin/tenants/:tenantId/knowledge', adminTenantKnowledgeRouter);
   app.use('/api/admin/usage', adminUsageRouter);
 
+  // Mounted before the broader '/api/tenant' routers below: those apply a blanket
+  // requireAuth to everything under their prefix, which would otherwise swallow
+  // Google's unauthenticated redirect to /api/tenant/calendar/callback.
+  app.use('/api/tenant/calendar', tenantCalendarRouter);
   app.use('/api/tenant', tenantInboxRouter);
   app.use('/api/tenant', tenantSettingsRouter);
-  app.use('/api/tenant/calendar', tenantCalendarRouter);
 
   // Static frontend build (production)
   const frontendDist = path.resolve(__dirname, '../../frontend/dist');
