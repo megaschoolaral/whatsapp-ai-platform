@@ -39,6 +39,71 @@ function systemMessage(tenant: TenantContext, ragContext: string): string {
   return sys;
 }
 
+type BookingOutcome =
+  | { ok: true; startAt: string; endAt: string }
+  | { ok: false; reason: 'not_connected' | 'invalid_time' | 'slot_taken' };
+
+interface TextModel {
+  meta: { provider: string; supportsVision: boolean };
+  sdkModel: Parameters<typeof generateText>[0]['model'];
+}
+
+/**
+ * If the model called book_appointment, the AI SDK's built-in multi-step continuation
+ * (re-sending the assistant's functionCall turn) fails against Gemini 3 models with
+ * "missing a thought_signature" — a gap in this SDK version's Gemini-3 support. Instead
+ * of relying on that continuation, we do our own plain-text follow-up call: no functionCall/
+ * functionResponse parts involved, so the thought_signature requirement never applies.
+ */
+async function resolveBookingFollowUp(
+  tenant: TenantContext,
+  textModel: TextModel,
+  ragContext: string,
+  userMessage: string,
+  result: { text: string; toolResults?: Array<{ toolName: string; result: unknown }>; usage?: { promptTokens?: number; completionTokens?: number } },
+  conversationId?: string | null,
+): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+  const booking = result.toolResults?.find((r) => r.toolName === 'book_appointment');
+  if (!booking) {
+    return {
+      text: result.text,
+      inputTokens: result.usage?.promptTokens ?? 0,
+      outputTokens: result.usage?.completionTokens ?? 0,
+    };
+  }
+
+  const outcome = booking.result as BookingOutcome;
+  const note = outcome.ok
+    ? `[System note: the appointment was successfully booked, from ${outcome.startAt} to ${outcome.endAt}. Confirm this to the client briefly, in their language.]`
+    : outcome.reason === 'slot_taken'
+      ? `[System note: the requested time slot is already taken. Apologize briefly and ask the client for a different time, in their language.]`
+      : `[System note: the calendar booking system is currently unavailable. Apologize briefly and tell the client someone will confirm manually, in their language.]`;
+
+  const followUp = await generateText({
+    model: textModel.sdkModel,
+    messages: [
+      { role: 'system', content: systemMessage(tenant, ragContext) },
+      { role: 'user', content: userMessage },
+      { role: 'user', content: note },
+    ] as CoreMessage[],
+  });
+
+  await logTextUsage({
+    tenantId: tenant.id,
+    provider: textModel.meta.provider,
+    modelId: tenant.textModelId,
+    inputTokens: followUp.usage?.promptTokens ?? 0,
+    outputTokens: followUp.usage?.completionTokens ?? 0,
+    conversationId,
+  });
+
+  return {
+    text: followUp.text,
+    inputTokens: (result.usage?.promptTokens ?? 0) + (followUp.usage?.promptTokens ?? 0),
+    outputTokens: (result.usage?.completionTokens ?? 0) + (followUp.usage?.completionTokens ?? 0),
+  };
+}
+
 /**
  * Vision fallback: if the user sent an image and the tenant's text model has weak/no vision,
  * use the vision model to describe the image and append the description to the prompt.
@@ -101,7 +166,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
           ],
         },
       ];
-      const result = await generateText({ model: textModel.sdkModel, messages, tools, maxSteps: 4 });
+      const result = await generateText({ model: textModel.sdkModel, messages, tools });
       await logTextUsage({
         tenantId: tenant.id,
         provider: textModel.meta.provider,
@@ -110,12 +175,8 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
         outputTokens: result.usage?.completionTokens ?? 0,
         conversationId,
       });
-      return {
-        text: result.text,
-        inputTokens: result.usage?.promptTokens ?? 0,
-        outputTokens: result.usage?.completionTokens ?? 0,
-        ragUsed: !!ragContext,
-      };
+      const final = await resolveBookingFollowUp(tenant, textModel, ragContext, userMessage, result, conversationId);
+      return { ...final, ragUsed: !!ragContext };
     }
     // Fallback: describe via vision model and append
     const desc = await describeImage(tenant, imageBase64, imageMimeType, conversationId ?? null);
@@ -127,7 +188,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     ...history.map<CoreMessage>((h) => ({ role: h.role, content: h.content })),
     { role: 'user', content: augmentedUserMessage },
   ];
-  const result = await generateText({ model: textModel.sdkModel, messages, tools, maxSteps: 4 });
+  const result = await generateText({ model: textModel.sdkModel, messages, tools });
 
   await logTextUsage({
     tenantId: tenant.id,
@@ -138,10 +199,6 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     conversationId,
   });
 
-  return {
-    text: result.text,
-    inputTokens: result.usage?.promptTokens ?? 0,
-    outputTokens: result.usage?.completionTokens ?? 0,
-    ragUsed: !!ragContext,
-  };
+  const final = await resolveBookingFollowUp(tenant, textModel, ragContext, userMessage, result, conversationId);
+  return { ...final, ragUsed: !!ragContext };
 }
