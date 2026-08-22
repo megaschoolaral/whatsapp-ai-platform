@@ -44,6 +44,9 @@ Railway auto-deploys on every push to `main` once the project is connected. Init
    | `SUPER_ADMIN_PASSWORD` | strong password, ≥12 chars | Must not be `password` / `admin` / `changeme` / `change_me_immediately` — the bootstrap refuses these. Remove this variable after first login. |
    | `APP_URL` | `https://YOUR-APP.up.railway.app` | **Must match the real domain.** Used for CORS and Socket.IO origin checks in production. Get the domain from Railway's "Settings → Networking → Generate Domain". |
    | `NODE_ENV` | `production` | |
+   | `GOOGLE_CLIENT_ID` | from Google Cloud Console | OAuth client for Calendar booking |
+   | `GOOGLE_CLIENT_SECRET` | from Google Cloud Console | keep secret |
+   | `GOOGLE_REDIRECT_URI` | `https://YOUR-APP.up.railway.app/api/tenant/calendar/callback` | must match a redirect URI registered on the OAuth client |
 
 6. **Generate a public domain** (Settings → Networking → Generate Domain), then update `APP_URL` to that domain and redeploy.
 
