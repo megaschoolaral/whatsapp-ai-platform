@@ -44,7 +44,7 @@ export const MODEL_PRICING = {
     },
     'gemini-3-flash': {
       provider: 'google',
-      modelId: 'gemini-2.5-flash',
+      modelId: 'gemini-3.6-flash',
       displayName: 'Gemini 3 Flash',
       inputPer1M: 0.5,
       outputPer1M: 3.0,
@@ -83,7 +83,7 @@ export const MODEL_PRICING = {
     },
     'gemini-3-flash': {
       provider: 'google',
-      modelId: 'gemini-2.5-flash',
+      modelId: 'gemini-3.6-flash',
       displayName: 'Gemini 3 Flash',
       inputPer1M: 0.5,
       outputPer1M: 3.0,
