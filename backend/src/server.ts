@@ -26,6 +26,7 @@ import { adminTenantKnowledgeRouter } from './routes/admin/tenantKnowledge.js';
 import { adminUsageRouter } from './routes/admin/usage.js';
 import { tenantInboxRouter } from './routes/tenant/inbox.js';
 import { tenantSettingsRouter } from './routes/tenant/settings.js';
+import { tenantCalendarRouter } from './routes/tenant/calendar.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,6 +52,7 @@ function buildApp(): Express {
 
   app.use('/api/tenant', tenantInboxRouter);
   app.use('/api/tenant', tenantSettingsRouter);
+  app.use('/api/tenant/calendar', tenantCalendarRouter);
 
   // Static frontend build (production)
   const frontendDist = path.resolve(__dirname, '../../frontend/dist');
