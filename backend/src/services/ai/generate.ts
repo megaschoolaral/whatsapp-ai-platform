@@ -2,6 +2,7 @@ import { generateText, type CoreMessage } from 'ai';
 import { resolveTextModel, resolveVisionModel } from './providers.js';
 import { logTextUsage, logVisionUsage } from './usageLog.js';
 import { queryCorpus } from './rag.js';
+import { bookAppointmentTool } from './tools/bookAppointment.js';
 import type { TenantContext } from '../tenantContext.js';
 
 export interface ChatTurn {
@@ -16,6 +17,7 @@ export interface GenerateReplyArgs {
   imageBase64?: string | null;   // for vision flow
   imageMimeType?: string | null;
   conversationId?: string | null;
+  clientPhone?: string | null;
 }
 
 export interface GenerateReplyResult {
@@ -30,6 +32,7 @@ function systemMessage(tenant: TenantContext, ragContext: string): string {
   let sys = tenant.aiPersona || 'You are a helpful assistant for a small business.';
   sys += `\n\nCurrent time: ${now}\nTimezone: ${tenant.timezone}`;
   sys += `\n\nIMPORTANT RULE: Never ask the client questions. Only answer what they ask. If the client's message is unclear, give the most helpful answer you can based on what you know — do not ask clarifying questions back.`;
+  sys += `\n\nYou can book appointments directly using the book_appointment tool once the client has confirmed a specific date and time. Every appointment is exactly 60 minutes. If the tool says the slot is taken, suggest a different time instead of retrying the same slot.`;
   if (ragContext) {
     sys += `\n\nRelevant info from knowledge base (use only if relevant):\n${ragContext}`;
   }
@@ -71,10 +74,15 @@ async function describeImage(
 }
 
 export async function generateReply(args: GenerateReplyArgs): Promise<GenerateReplyResult> {
-  const { tenant, history, userMessage, imageBase64, imageMimeType, conversationId } = args;
+  const { tenant, history, userMessage, imageBase64, imageMimeType, conversationId, clientPhone } = args;
 
   // 1. RAG
   const ragContext = await queryCorpus(tenant, userMessage, conversationId);
+
+  const tools =
+    conversationId && clientPhone
+      ? { book_appointment: bookAppointmentTool(tenant, conversationId, clientPhone) }
+      : undefined;
 
   // 2. Vision fallback (if image and text model can't handle vision natively)
   let augmentedUserMessage = userMessage;
@@ -93,7 +101,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
           ],
         },
       ];
-      const result = await generateText({ model: textModel.sdkModel, messages });
+      const result = await generateText({ model: textModel.sdkModel, messages, tools, maxSteps: 4 });
       await logTextUsage({
         tenantId: tenant.id,
         provider: textModel.meta.provider,
@@ -119,7 +127,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     ...history.map<CoreMessage>((h) => ({ role: h.role, content: h.content })),
     { role: 'user', content: augmentedUserMessage },
   ];
-  const result = await generateText({ model: textModel.sdkModel, messages });
+  const result = await generateText({ model: textModel.sdkModel, messages, tools, maxSteps: 4 });
 
   await logTextUsage({
     tenantId: tenant.id,

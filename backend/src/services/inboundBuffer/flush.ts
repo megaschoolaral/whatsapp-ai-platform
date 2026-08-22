@@ -68,6 +68,7 @@ export async function flushBuffer(tenantId: string, jid: string): Promise<void> 
       imageBase64: lastImage?.imageBase64 ?? null,
       imageMimeType: lastImage?.imageMimeType ?? null,
       conversationId,
+      clientPhone: conversation.contactIdentifier,
     });
   } catch (err) {
     logger.error({ err, tenantId }, '[flush] generateReply failed — staying ai_active for retry');
