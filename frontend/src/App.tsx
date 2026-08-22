@@ -16,6 +16,7 @@ import {
   UsagePage,
   ChannelStatusPage,
 } from '@/pages/tenant/SimplePages';
+import { CalendarPage } from '@/pages/tenant/CalendarPage';
 import { useAuthStore } from '@/stores/authStore';
 
 function RootRedirect() {
@@ -37,6 +38,7 @@ const tenantLinks = [
   { to: '/app/knowledge', label: 'KB' },
   { to: '/app/usage', label: 'Расходы' },
   { to: '/app/channel', label: 'WhatsApp' },
+  { to: '/app/calendar', label: 'Календарь' },
 ];
 
 export default function App() {
@@ -64,6 +66,7 @@ export default function App() {
           <Route path="/app/knowledge" element={<KnowledgePage />} />
           <Route path="/app/usage" element={<UsagePage />} />
           <Route path="/app/channel" element={<ChannelStatusPage />} />
+          <Route path="/app/calendar" element={<CalendarPage />} />
         </Route>
       </Route>
 
