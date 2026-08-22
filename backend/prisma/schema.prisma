@@ -37,6 +37,17 @@ enum AiUsageCategory {
   rag
 }
 
+enum GoogleCalendarStatus {
+  connected
+  error
+  disconnected
+}
+
+enum AppointmentStatus {
+  booked
+  cancelled
+}
+
 model User {
   id                  String     @id @default(uuid())
   email               String     @unique
@@ -72,6 +83,8 @@ model Tenant {
   knowledgeFiles     KnowledgeFile[]
   apiKeyAuditLogs    ApiKeyAuditLog[]
   aiUsageLogs        AiUsageLog[]
+  googleCalendar     TenantGoogleCalendar?
+  appointments       Appointment[]
 }
 
 model TenantApiKeys {
@@ -159,6 +172,7 @@ model Conversation {
   createdAt                DateTime            @default(now())
 
   messages                 Message[]
+  appointments             Appointment[]
 
   @@unique([tenantId, contactIdentifier])
   @@index([tenantId, status, lastMessageAt])
@@ -199,4 +213,33 @@ model AiUsageLog {
 
   @@index([tenantId, createdAt])
   @@index([tenantId, category, createdAt])
+}
+
+model TenantGoogleCalendar {
+  tenantId                String               @id
+  tenant                  Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  encryptedRefreshToken   String
+  googleEmail             String
+  calendarId              String               @default("primary")
+  status                  GoogleCalendarStatus @default(connected)
+  connectedAt             DateTime             @default(now())
+  lastErrorAt             DateTime?
+  lastErrorMessage        String?
+}
+
+model Appointment {
+  id             String            @id @default(cuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  clientName     String
+  clientPhone    String
+  startAt        DateTime
+  endAt          DateTime
+  googleEventId  String
+  status         AppointmentStatus @default(booked)
+  createdAt      DateTime          @default(now())
+
+  @@index([tenantId, startAt])
 }
