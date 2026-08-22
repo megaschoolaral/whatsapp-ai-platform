@@ -2,8 +2,11 @@ import jwt from 'jsonwebtoken';
 import { google } from 'googleapis';
 import { env } from '../../env.js';
 
+// `calendar.events` alone is NOT enough for freebusy.query — Google requires the
+// broader `calendar` scope for that endpoint. It's a superset, so it also covers
+// event creation.
 const CALENDAR_SCOPES = [
-  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar',
   'https://www.googleapis.com/auth/userinfo.email',
   'openid',
 ];
