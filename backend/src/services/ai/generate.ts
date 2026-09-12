@@ -25,11 +25,14 @@ export interface GenerateReplyResult {
   ragUsed: boolean;
 }
 
-function systemMessage(tenant: TenantContext, ragContext: string): string {
+function systemMessage(tenant: TenantContext, ragContext: string, isFirstMessage: boolean): string {
   const now = new Date().toLocaleString('ru-RU', { timeZone: tenant.timezone });
   let sys = tenant.aiPersona || 'You are a helpful assistant for a small business.';
   sys += `\n\nCurrent time: ${now}\nTimezone: ${tenant.timezone}`;
   sys += `\n\nIMPORTANT RULE: Never ask the client questions. Only answer what they ask. If the client's message is unclear, give the most helpful answer you can based on what you know — do not ask clarifying questions back.`;
+  sys += isFirstMessage
+    ? `\n\nIMPORTANT RULE: This is the first message in the conversation — greet the client briefly.`
+    : `\n\nIMPORTANT RULE: This is NOT the first message in the conversation — do NOT greet the client again (no "Здравствуйте"/"Сәлеметсіз бе" etc.), answer the question directly.`;
   if (ragContext) {
     sys += `\n\nRelevant info from knowledge base (use only if relevant):\n${ragContext}`;
   }
@@ -83,7 +86,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     if (textModel.meta.supportsVision) {
       // Send image directly to text model
       const messages: CoreMessage[] = [
-        { role: 'system', content: systemMessage(tenant, ragContext) },
+        { role: 'system', content: systemMessage(tenant, ragContext, history.length === 0) },
         ...history.map<CoreMessage>((h) => ({ role: h.role, content: h.content })),
         {
           role: 'user',
@@ -115,7 +118,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
   }
 
   const messages: CoreMessage[] = [
-    { role: 'system', content: systemMessage(tenant, ragContext) },
+    { role: 'system', content: systemMessage(tenant, ragContext, history.length === 0) },
     ...history.map<CoreMessage>((h) => ({ role: h.role, content: h.content })),
     { role: 'user', content: augmentedUserMessage },
   ];
