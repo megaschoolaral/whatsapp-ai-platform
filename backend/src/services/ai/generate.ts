@@ -39,6 +39,15 @@ function systemMessage(tenant: TenantContext, ragContext: string, isFirstMessage
   return sys;
 }
 
+const GREETING_PREFIX_RE =
+  /^\s*(сәлеметсіз\s*бе|сәлеметсізбе|здравствуйте|добрый\s+день|доброе\s+утро|добрый\s+вечер|привет)[!.,\s-]*/i;
+
+function stripRepeatedGreeting(text: string, isFirstMessage: boolean): string {
+  if (isFirstMessage) return text;
+  const stripped = text.replace(GREETING_PREFIX_RE, '');
+  return stripped.trim() || text;
+}
+
 /**
  * Vision fallback: if the user sent an image and the tenant's text model has weak/no vision,
  * use the vision model to describe the image and append the description to the prompt.
@@ -106,7 +115,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
         conversationId,
       });
       return {
-        text: result.text,
+        text: stripRepeatedGreeting(result.text, history.length === 0),
         inputTokens: result.usage?.promptTokens ?? 0,
         outputTokens: result.usage?.completionTokens ?? 0,
         ragUsed: !!ragContext,
@@ -134,7 +143,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
   });
 
   return {
-    text: result.text,
+    text: stripRepeatedGreeting(result.text, history.length === 0),
     inputTokens: result.usage?.promptTokens ?? 0,
     outputTokens: result.usage?.completionTokens ?? 0,
     ragUsed: !!ragContext,
