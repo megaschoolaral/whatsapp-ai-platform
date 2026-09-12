@@ -67,6 +67,7 @@ model Tenant {
 
   apiKeys            TenantApiKeys?
   modelChoices       TenantModelChoices?
+  followupSettings   TenantFollowupSettings?
   whatsappSession    WhatsappSession?
   conversations      Conversation[]
   knowledgeFiles     KnowledgeFile[]
@@ -105,6 +106,17 @@ model TenantModelChoices {
   textModelId     String   @default("gemini-3-flash")
   visionModelId   String   @default("gemini-3-flash")
   sttModelId      String   @default("elevenlabs-scribe-v2")
+  updatedAt       DateTime @updatedAt
+}
+
+model TenantFollowupSettings {
+  tenantId        String   @id
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enabled         Boolean  @default(false)
+  delay1hMinutes  Int      @default(60)
+  delay2hMinutes  Int      @default(720)
+  message1Text    String   @default("")
+  message2Text    String   @default("")
   updatedAt       DateTime @updatedAt
 }
 
@@ -155,6 +167,7 @@ model Conversation {
   lastHumanActivityAt      DateTime?
   handoffReason            String?
   lastMessageAt            DateTime            @default(now())
+  lastInboundMessageAt     DateTime?
   unreadCount              Int                 @default(0)
   createdAt                DateTime            @default(now())
 

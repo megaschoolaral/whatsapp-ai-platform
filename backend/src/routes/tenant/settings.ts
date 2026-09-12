@@ -250,3 +250,37 @@ tenantSettingsRouter.post('/whatsapp/reconnect', async (req, res) => {
   await connectTenant(req.tenantScope!);
   res.json({ ok: true });
 });
+
+// FOLLOW-UPS
+tenantSettingsRouter.get('/followups', async (req, res) => {
+  const s = await prisma.tenantFollowupSettings.findUnique({ where: { tenantId: req.tenantScope! } });
+  res.json(
+    s ?? {
+      enabled: false,
+      delay1hMinutes: 60,
+      delay2hMinutes: 720,
+      message1Text: '',
+      message2Text: '',
+    },
+  );
+});
+const followupsSchema = z.object({
+  enabled: z.boolean(),
+  delay1hMinutes: z.number().int().min(1),
+  delay2hMinutes: z.number().int().min(1),
+  message1Text: z.string().max(4000),
+  message2Text: z.string().max(4000),
+});
+tenantSettingsRouter.put('/followups', async (req, res) => {
+  const parsed = followupsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid input' });
+    return;
+  }
+  const updated = await prisma.tenantFollowupSettings.upsert({
+    where: { tenantId: req.tenantScope! },
+    create: { tenantId: req.tenantScope!, ...parsed.data },
+    update: parsed.data,
+  });
+  res.json(updated);
+});

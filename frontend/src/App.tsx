@@ -10,6 +10,7 @@ import { UsageCrossTenantPage } from '@/pages/admin/UsageCrossTenantPage';
 import { InboxPage } from '@/pages/tenant/InboxPage';
 import {
   PersonaPage,
+  FollowupsPage,
   ModelsPage,
   KeysPage,
   KnowledgePage,
@@ -32,6 +33,7 @@ const adminLinks = [
 const tenantLinks = [
   { to: '/app', label: 'Inbox' },
   { to: '/app/persona', label: 'Persona' },
+  { to: '/app/followups', label: 'Follow-up хабарламалар' },
   { to: '/app/models', label: 'Модели' },
   { to: '/app/keys', label: 'API ключи' },
   { to: '/app/knowledge', label: 'KB' },
@@ -59,6 +61,7 @@ export default function App() {
         <Route element={<Layout links={tenantLinks} />}>
           <Route path="/app" element={<InboxPage />} />
           <Route path="/app/persona" element={<PersonaPage />} />
+          <Route path="/app/followups" element={<FollowupsPage />} />
           <Route path="/app/models" element={<ModelsPage />} />
           <Route path="/app/keys" element={<KeysPage />} />
           <Route path="/app/knowledge" element={<KnowledgePage />} />

@@ -9,6 +9,7 @@ import { shouldHandoff } from '../conversations/handoff.js';
 import { sendHumanLikeText } from '../whatsapp/outbound.js';
 import { getSession } from '../whatsapp/manager.js';
 import { emitToTenant } from '../realtime/socketRooms.js';
+import { scheduleFollowups } from '../followup/scheduler.js';
 
 export async function flushBuffer(tenantId: string, jid: string): Promise<void> {
   const { messages, conversationId } = await readAndClearBuffer(tenantId, jid);
@@ -104,4 +105,5 @@ export async function flushBuffer(tenantId: string, jid: string): Promise<void> 
     sentBy: 'ai',
     content: reply.text,
   });
+  await scheduleFollowups(tenantId, conversationId, jid);
 }
