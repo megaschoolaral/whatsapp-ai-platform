@@ -33,6 +33,15 @@ export async function connectTenant(tenantId: string): Promise<void> {
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
+    // Ignore late events from a stale socket (e.g. after a 515 restart or re-pair):
+    // otherwise its `close` would tear down the live session and spawn a duplicate
+    // socket, and the two would kick each other with `conflict: replaced`.
+    if (getSession(tenantId)?.sock !== sock) {
+      if (connection === 'close') {
+        logger.info({ tenantId }, '[whatsapp] ignoring close from stale socket');
+      }
+      return;
+    }
     if (qr) {
       updateSession(tenantId, { status: 'qr', lastQr: qr });
       await prisma.whatsappSession.update({ where: { tenantId }, data: { status: 'qr' } }).catch(() => undefined);
