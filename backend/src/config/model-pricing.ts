@@ -106,7 +106,7 @@ export const MODEL_PRICING = {
     },
     soniox: {
       provider: 'soniox',
-      modelId: 'stt-async-preview',
+      modelId: 'stt-async-v5',
       displayName: 'Soniox',
       pricePerHour: 0.4,
       isActive: true,
