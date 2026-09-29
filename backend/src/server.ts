@@ -13,6 +13,7 @@ import { bootstrapSuperAdmin } from './bootstrap/superAdmin.js';
 import { startWorkers } from './queues/workers.js';
 import { setIo } from './services/realtime/socketRooms.js';
 import { connectTenant } from './services/whatsapp/connect.js';
+import { closeAllSessions } from './services/whatsapp/manager.js';
 import { verifyToken } from './auth/jwt.js';
 
 import { healthRouter } from './routes/health.js';
@@ -126,6 +127,7 @@ async function main() {
   const shutdown = async () => {
     logger.info('[server] shutting down');
     server.close();
+    closeAllSessions();
     await prisma.$disconnect();
     process.exit(0);
   };
