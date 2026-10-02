@@ -6,7 +6,7 @@ import makeWASocket, {
 import type { Boom } from '@hapi/boom';
 import { logger } from '../../logger.js';
 import { prisma } from '../../prisma.js';
-import { makeDbAuthState } from './sessionStore.js';
+import { makeDbAuthState, flushAuthKeys } from './sessionStore.js';
 import { setSession, updateSession, getSession, removeSession } from './manager.js';
 import { emitToTenant } from '../realtime/socketRooms.js';
 import { handleIncomingMessage, handleOutgoingFromPhone } from './inbound.js';
@@ -84,6 +84,7 @@ export async function connectTenant(tenantId: string): Promise<void> {
     if (connection === 'close') {
       const reason = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
       logger.warn({ tenantId, reason }, '[whatsapp] connection closed');
+      await flushAuthKeys(tenantId).catch((err) => logger.error({ err, tenantId }, '[whatsapp] auth key flush failed'));
       await prisma.whatsappSession.update({
         where: { tenantId },
         data: { status: 'disconnected', lastDisconnectReason: String(reason ?? 'unknown') },
