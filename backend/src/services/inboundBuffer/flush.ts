@@ -11,6 +11,11 @@ import { getSession } from '../whatsapp/manager.js';
 import { emitToTenant } from '../realtime/socketRooms.js';
 import { scheduleFollowups } from '../followup/scheduler.js';
 
+async function isHumanInControl(tenantId: string, conversationId: string): Promise<boolean> {
+  const conv = await prisma.conversation.findFirst({ where: { id: conversationId, tenantId }, select: { status: true } });
+  return !conv || conv.status === 'human_active' || conv.status === 'awaiting_human';
+}
+
 export async function flushBuffer(tenantId: string, jid: string): Promise<void> {
   const { messages, conversationId } = await readAndClearBuffer(tenantId, jid);
   if (!messages.length || !conversationId) return;
@@ -79,13 +84,25 @@ export async function flushBuffer(tenantId: string, jid: string): Promise<void> 
     return;
   }
 
+  // An operator may have taken over while the AI reply was being generated.
+  if (await isHumanInControl(tenantId, conversationId)) {
+    logger.info({ tenantId, conversationId }, '[flush] human took over during generation, dropping AI reply');
+    return;
+  }
+
   const sendResult = await sendHumanLikeText({
     tenantId,
     sock: session.sock,
     jid,
     text: reply.text,
     markReadKey: messages[messages.length - 1]?.fromMeKey,
+    shouldAbort: () => isHumanInControl(tenantId, conversationId),
   });
+
+  if (!sendResult.sent && sendResult.reason === 'aborted') {
+    logger.info({ tenantId, conversationId }, '[flush] human took over before send, dropping AI reply');
+    return;
+  }
 
   if (!sendResult.sent) {
     logger.warn({ tenantId, reason: sendResult.reason }, '[flush] outbound blocked');

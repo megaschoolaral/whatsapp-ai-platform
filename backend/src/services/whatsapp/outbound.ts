@@ -10,6 +10,8 @@ export async function sendHumanLikeText(args: {
   jid: string;
   text: string;
   markReadKey?: object;
+  /** Re-checked right before the actual send, after all delays; return true to drop the message. */
+  shouldAbort?: () => Promise<boolean>;
 }): Promise<{ sent: boolean; reason?: string }> {
   const limits = await canSendAndIncrement(args.tenantId);
   if (!limits.allowed) {
@@ -46,7 +48,10 @@ export async function sendHumanLikeText(args: {
   }
   await delay(randomBetween(300, 800));
 
-  // 5. send
+  // 5. send (unless the caller says the message is no longer wanted)
+  if (args.shouldAbort && (await args.shouldAbort())) {
+    return { sent: false, reason: 'aborted' };
+  }
   await args.sock.sendMessage(args.jid, { text: args.text });
   return { sent: true };
 }
