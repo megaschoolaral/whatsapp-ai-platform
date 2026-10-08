@@ -2,6 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { prisma } from '../../../prisma.js';
 import { getAuthorizedClient, checkFreebusy, createBookingEvent } from '../../calendar/googleCalendar.js';
+import { parseTenantDateTime } from '../../calendar/timeUtils.js';
 import type { TenantContext } from '../../tenantContext.js';
 
 const inputSchema = z.object({
@@ -11,7 +12,9 @@ const inputSchema = z.object({
     .min(5)
     .describe("The phone number the client told you in the conversation (not guessed, not the WhatsApp ID)"),
   service: z.string().min(2).describe('The service the client is booking, e.g. "Женская стрижка"'),
-  requestedStartAt: z.string().describe('ISO 8601 datetime for the requested appointment start, in the tenant timezone'),
+  requestedStartAt: z
+    .string()
+    .describe('ISO 8601 datetime for the appointment start in the tenant timezone, e.g. 2026-10-09T13:00:00+05:00'),
 });
 
 export function bookAppointmentTool(tenant: TenantContext, conversationId: string) {
@@ -27,7 +30,7 @@ export function bookAppointmentTool(tenant: TenantContext, conversationId: strin
       if (!auth) {
         return { ok: false, reason: 'not_connected' as const };
       }
-      const startAt = new Date(requestedStartAt);
+      const startAt = parseTenantDateTime(requestedStartAt, tenant.timezone);
       if (Number.isNaN(startAt.getTime())) {
         return { ok: false, reason: 'invalid_time' as const };
       }

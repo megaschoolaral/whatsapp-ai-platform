@@ -2,7 +2,10 @@ import { generateText, type CoreMessage } from 'ai';
 import { resolveTextModel, resolveVisionModel } from './providers.js';
 import { logTextUsage, logVisionUsage } from './usageLog.js';
 import { queryCorpus } from './rag.js';
+import { prisma } from '../../prisma.js';
 import { bookAppointmentTool } from './tools/bookAppointment.js';
+import { checkAvailabilityTool } from './tools/checkAvailability.js';
+import { formatLocalDate } from '../calendar/timeUtils.js';
 import type { TenantContext } from '../tenantContext.js';
 
 export interface ChatTurn {
@@ -27,12 +30,16 @@ export interface GenerateReplyResult {
   ragUsed: boolean;
 }
 
-function systemMessage(tenant: TenantContext, ragContext: string, isFirstMessage: boolean): string {
+function systemMessage(tenant: TenantContext, ragContext: string, isFirstMessage: boolean, hasCalendar: boolean): string {
   const now = new Date().toLocaleString('ru-RU', { timeZone: tenant.timezone });
   let sys = tenant.aiPersona || 'You are a helpful assistant for a small business.';
-  sys += `\n\nCurrent time: ${now}\nTimezone: ${tenant.timezone}`;
+  const today = formatLocalDate(new Date(), tenant.timezone);
+  sys += `\n\nCurrent time: ${now}\nToday's date (YYYY-MM-DD): ${today}\nTimezone: ${tenant.timezone}`;
   sys += `\n\nIMPORTANT RULE: Do not ask the client unnecessary questions. Only answer what they ask. If the client's message is unclear, give the most helpful answer you can based on what you know. The only exception: when the client wants to book an appointment, you MUST ask for any missing booking details (see below), and you may ask other questions that your persona instructions explicitly require.`;
-  sys += `\n\nYou can book appointments directly using the book_appointment tool once the client has confirmed a specific date and time and you have their name, their phone number and the service. If any of these is missing, ask the client for it before booking — never invent or guess them. Every appointment is exactly 60 minutes. If the tool says the slot is taken, suggest a different time instead of retrying the same slot.`;
+  if (hasCalendar) {
+    sys += `\n\nYou can book appointments directly using the book_appointment tool once the client has confirmed a specific date and time and you have their name, their phone number and the service. If any of these is missing, ask the client for it before booking — never invent or guess them. Every appointment is exactly 60 minutes. If the tool says the slot is taken, suggest a different time instead of retrying the same slot.`;
+    sys += `\n\nAVAILABILITY RULE: You cannot know which times are free on your own. Before telling the client that a time is free or taken, and before proposing alternative times, call the check_availability tool for that date (pass the working hours from your instructions as workStart/workEnd if they are given). Offer only times that the tool returned as free; never invent availability.`;
+  }
   sys += isFirstMessage
     ? `\n\nIMPORTANT RULE: This is the first message in the conversation — greet the client briefly.`
     : `\n\nIMPORTANT RULE: This is NOT the first message in the conversation — do NOT greet the client again (no "Здравствуйте"/"Сәлеметсіз бе" etc.), answer the question directly.`;
@@ -55,29 +62,42 @@ type BookingOutcome =
   | { ok: true; startAt: string; endAt: string }
   | { ok: false; reason: 'not_connected' | 'invalid_time' | 'slot_taken' | 'calendar_error' };
 
+type AvailabilityOutcome =
+  | {
+      ok: true;
+      date: string;
+      timezone: string;
+      slotMinutes: number;
+      busy: Array<{ from: string; to: string }>;
+      freeStartTimes: string[];
+    }
+  | { ok: false; reason: 'not_connected' | 'calendar_error' | 'invalid_input' };
+
 interface TextModel {
   meta: { provider: string; supportsVision: boolean };
   sdkModel: Parameters<typeof generateText>[0]['model'];
 }
 
 /**
- * If the model called book_appointment, the AI SDK's built-in multi-step continuation
+ * If the model called a calendar tool, the AI SDK's built-in multi-step continuation
  * (re-sending the assistant's functionCall turn) fails against Gemini 3 models with
  * "missing a thought_signature" — a gap in this SDK version's Gemini-3 support. Instead
  * of relying on that continuation, we do our own plain-text follow-up call: no functionCall/
  * functionResponse parts involved, so the thought_signature requirement never applies.
  */
-async function resolveBookingFollowUp(
+async function resolveToolFollowUp(
   tenant: TenantContext,
   textModel: TextModel,
   ragContext: string,
   userMessage: string,
+  history: ChatTurn[],
   result: { text: string; toolResults?: Array<{ toolName: string; result: unknown }>; usage?: { promptTokens?: number; completionTokens?: number } },
   isFirstMessage: boolean,
   conversationId?: string | null,
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const booking = result.toolResults?.find((r) => r.toolName === 'book_appointment');
-  if (!booking) {
+  const availability = result.toolResults?.find((r) => r.toolName === 'check_availability');
+  if (!booking && !availability) {
     return {
       text: stripRepeatedGreeting(result.text, isFirstMessage),
       inputTokens: result.usage?.promptTokens ?? 0,
@@ -85,19 +105,34 @@ async function resolveBookingFollowUp(
     };
   }
 
-  const outcome = booking.result as BookingOutcome;
-  const note = outcome.ok
-    ? `[System note: the appointment was successfully booked, from ${outcome.startAt} to ${outcome.endAt}. Confirm this to the client briefly, in their language.]`
-    : outcome.reason === 'slot_taken'
-      ? `[System note: the requested time slot is already taken. Apologize briefly and ask the client for a different time, in their language.]`
-      : outcome.reason === 'invalid_time'
-        ? `[System note: the requested date/time could not be understood. Ask the client to restate the exact date and time, in their language.]`
-        : `[System note: the booking could not be completed right now due to a technical problem. Apologize briefly and ask the client to try again in a few minutes. Do not mention any manager or manual confirmation. Reply in their language.]`;
+  let note: string;
+  if (booking) {
+    const outcome = booking.result as BookingOutcome;
+    note = outcome.ok
+      ? `[System note: the appointment was successfully booked, from ${outcome.startAt} to ${outcome.endAt}. Confirm this to the client briefly, in their language, including the name, phone, service, date and time.]`
+      : outcome.reason === 'slot_taken'
+        ? `[System note: the requested time slot is already taken. Apologize briefly and ask the client for a different time, in their language.]`
+        : outcome.reason === 'invalid_time'
+          ? `[System note: the requested date/time could not be understood. Ask the client to restate the exact date and time, in their language.]`
+          : `[System note: the booking could not be completed right now due to a technical problem. Apologize briefly and ask the client to try again in a few minutes. Do not mention any manager or manual confirmation. Reply in their language.]`;
+  } else {
+    const a = (availability as { result: unknown }).result as AvailabilityOutcome;
+    note = a.ok
+      ? `[System note: Google Calendar availability for ${a.date} (${a.timezone}). Busy: ${
+          a.busy.length ? a.busy.map((b) => `${b.from}-${b.to}`).join(', ') : 'nothing'
+        }. Free ${a.slotMinutes}-minute start times: ${
+          a.freeStartTimes.length ? a.freeStartTimes.join(', ') : 'none'
+        }. If the time the client asked for is in the free list, it is free: continue with the booking steps (ask for any missing name, phone, service). If it is not, say it is taken and offer the 2-3 nearest free times from the list. If nothing is free, say so and offer another day. Never invent times that are not in the list. Reply in the client's language.]`
+      : a.reason === 'invalid_input'
+        ? `[System note: the date could not be understood. Ask the client for the exact date, in their language.]`
+        : `[System note: the calendar could not be read right now due to a technical problem. Apologize briefly and ask the client to try again in a few minutes. Do not mention any manager. Reply in their language.]`;
+  }
 
   const followUp = await generateText({
     model: textModel.sdkModel,
     messages: [
-      { role: 'system', content: systemMessage(tenant, ragContext, isFirstMessage) },
+      { role: 'system', content: systemMessage(tenant, ragContext, isFirstMessage, true) },
+      ...history.map<CoreMessage>((h) => ({ role: h.role, content: h.content })),
       { role: 'user', content: userMessage },
       { role: 'user', content: note },
     ] as CoreMessage[],
@@ -159,9 +194,14 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
   // 1. RAG
   const ragContext = await queryCorpus(tenant, userMessage, conversationId);
 
-  const tools =
+  // Calendar tools (and the calendar prompt rules) only exist for tenants with a connected Google Calendar.
+  const calendar =
     conversationId && clientPhone
-      ? { book_appointment: bookAppointmentTool(tenant, conversationId) }
+      ? await prisma.tenantGoogleCalendar.findUnique({ where: { tenantId: tenant.id }, select: { status: true } })
+      : null;
+  const tools =
+    conversationId && clientPhone && calendar?.status === 'connected'
+      ? { book_appointment: bookAppointmentTool(tenant, conversationId), check_availability: checkAvailabilityTool(tenant) }
       : undefined;
 
   // 2. Vision fallback (if image and text model can't handle vision natively)
@@ -171,7 +211,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     if (textModel.meta.supportsVision) {
       // Send image directly to text model
       const messages: CoreMessage[] = [
-        { role: 'system', content: systemMessage(tenant, ragContext, history.length === 0) },
+        { role: 'system', content: systemMessage(tenant, ragContext, history.length === 0, !!tools) },
         ...history.map<CoreMessage>((h) => ({ role: h.role, content: h.content })),
         {
           role: 'user',
@@ -190,7 +230,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
         outputTokens: result.usage?.completionTokens ?? 0,
         conversationId,
       });
-      const final = await resolveBookingFollowUp(tenant, textModel, ragContext, userMessage, result, history.length === 0, conversationId);
+      const final = await resolveToolFollowUp(tenant, textModel, ragContext, userMessage, history, result, history.length === 0, conversationId);
       return { ...final, ragUsed: !!ragContext };
     }
     // Fallback: describe via vision model and append
@@ -199,7 +239,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
   }
 
   const messages: CoreMessage[] = [
-    { role: 'system', content: systemMessage(tenant, ragContext, history.length === 0) },
+    { role: 'system', content: systemMessage(tenant, ragContext, history.length === 0, !!tools) },
     ...history.map<CoreMessage>((h) => ({ role: h.role, content: h.content })),
     { role: 'user', content: augmentedUserMessage },
   ];
@@ -214,6 +254,6 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     conversationId,
   });
 
-  const final = await resolveBookingFollowUp(tenant, textModel, ragContext, userMessage, result, history.length === 0, conversationId);
+  const final = await resolveToolFollowUp(tenant, textModel, ragContext, userMessage, history, result, history.length === 0, conversationId);
   return { ...final, ragUsed: !!ragContext };
 }

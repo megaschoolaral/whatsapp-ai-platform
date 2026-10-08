@@ -47,6 +47,28 @@ export async function checkFreebusy(
   return busy.length === 0;
 }
 
+export async function getBusyIntervals(
+  client: CalendarOAuth2Client,
+  calendarId: string,
+  timeMin: Date,
+  timeMax: Date,
+  timezone: string,
+): Promise<Array<{ start: Date; end: Date }>> {
+  const calendar = google.calendar({ version: 'v3', auth: client });
+  const res = await calendar.freebusy.query({
+    requestBody: {
+      timeMin: timeMin.toISOString(),
+      timeMax: timeMax.toISOString(),
+      timeZone: timezone,
+      items: [{ id: calendarId }],
+    },
+  });
+  const busy = res.data.calendars?.[calendarId]?.busy ?? [];
+  return busy
+    .filter((b) => b.start && b.end)
+    .map((b) => ({ start: new Date(b.start as string), end: new Date(b.end as string) }));
+}
+
 export async function createBookingEvent(
   client: CalendarOAuth2Client,
   calendarId: string,
