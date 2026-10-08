@@ -27,22 +27,28 @@ export function bookAppointmentTool(tenant: TenantContext, conversationId: strin
       }
       const endAt = new Date(startAt.getTime() + 60 * 60 * 1000);
 
-      const isFree = await checkFreebusy(auth.client, auth.calendarId, startAt, endAt, tenant.timezone);
-      if (!isFree) {
-        return { ok: false, reason: 'slot_taken' as const };
+      try {
+        const isFree = await checkFreebusy(auth.client, auth.calendarId, startAt, endAt, tenant.timezone);
+        if (!isFree) {
+          return { ok: false, reason: 'slot_taken' as const };
+        }
+
+        const googleEventId = await createBookingEvent(auth.client, auth.calendarId, {
+          clientName,
+          clientPhone,
+          startAt,
+          endAt,
+          timezone: tenant.timezone,
+        });
+
+        await prisma.appointment.create({
+          data: { tenantId: tenant.id, conversationId, clientName, clientPhone, startAt, endAt, googleEventId },
+        });
+      } catch (err) {
+        // Return the failure to the model instead of throwing, so the client always gets a reply.
+        console.error('[book_appointment] Google Calendar call failed', { tenantId: tenant.id, err: (err as Error).message });
+        return { ok: false, reason: 'calendar_error' as const };
       }
-
-      const googleEventId = await createBookingEvent(auth.client, auth.calendarId, {
-        clientName,
-        clientPhone,
-        startAt,
-        endAt,
-        timezone: tenant.timezone,
-      });
-
-      await prisma.appointment.create({
-        data: { tenantId: tenant.id, conversationId, clientName, clientPhone, startAt, endAt, googleEventId },
-      });
 
       return { ok: true as const, startAt: startAt.toISOString(), endAt: endAt.toISOString() };
     },

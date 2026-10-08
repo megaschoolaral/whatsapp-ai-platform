@@ -53,7 +53,7 @@ function stripRepeatedGreeting(text: string, isFirstMessage: boolean): string {
 
 type BookingOutcome =
   | { ok: true; startAt: string; endAt: string }
-  | { ok: false; reason: 'not_connected' | 'invalid_time' | 'slot_taken' };
+  | { ok: false; reason: 'not_connected' | 'invalid_time' | 'slot_taken' | 'calendar_error' };
 
 interface TextModel {
   meta: { provider: string; supportsVision: boolean };
@@ -90,7 +90,9 @@ async function resolveBookingFollowUp(
     ? `[System note: the appointment was successfully booked, from ${outcome.startAt} to ${outcome.endAt}. Confirm this to the client briefly, in their language.]`
     : outcome.reason === 'slot_taken'
       ? `[System note: the requested time slot is already taken. Apologize briefly and ask the client for a different time, in their language.]`
-      : `[System note: the calendar booking system is currently unavailable. Apologize briefly and tell the client someone will confirm manually, in their language.]`;
+      : outcome.reason === 'invalid_time'
+        ? `[System note: the requested date/time could not be understood. Ask the client to restate the exact date and time, in their language.]`
+        : `[System note: the booking could not be completed right now due to a technical problem. Apologize briefly and ask the client to try again in a few minutes. Do not mention any manager or manual confirmation. Reply in their language.]`;
 
   const followUp = await generateText({
     model: textModel.sdkModel,
