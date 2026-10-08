@@ -50,14 +50,14 @@ export async function checkFreebusy(
 export async function createBookingEvent(
   client: CalendarOAuth2Client,
   calendarId: string,
-  args: { clientName: string; clientPhone: string; startAt: Date; endAt: Date; timezone: string },
+  args: { clientName: string; clientPhone: string; service: string; startAt: Date; endAt: Date; timezone: string },
 ): Promise<string> {
   const calendar = google.calendar({ version: 'v3', auth: client });
   const res = await calendar.events.insert({
     calendarId,
     requestBody: {
-      summary: `Брон: ${args.clientName} (${args.clientPhone})`,
-      description: `Клиент: ${args.clientName}\nТелефон: ${args.clientPhone}\nЗабронировано через WhatsApp AI`,
+      summary: `${args.clientName} — ${args.clientPhone} — ${args.service}`,
+      description: `Клиент: ${args.clientName}\nТелефон: ${args.clientPhone}\nУслуга: ${args.service}\nЗабронировано через WhatsApp AI`,
       start: { dateTime: args.startAt.toISOString(), timeZone: args.timezone },
       end: { dateTime: args.endAt.toISOString(), timeZone: args.timezone },
     },

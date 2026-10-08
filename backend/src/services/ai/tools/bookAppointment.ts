@@ -5,18 +5,24 @@ import { getAuthorizedClient, checkFreebusy, createBookingEvent } from '../../ca
 import type { TenantContext } from '../../tenantContext.js';
 
 const inputSchema = z.object({
-  clientName: z.string().describe("The client's name, as given in the conversation"),
+  clientName: z.string().min(2).describe("The client's name, exactly as the client told you in the conversation"),
+  clientPhone: z
+    .string()
+    .min(5)
+    .describe("The phone number the client told you in the conversation (not guessed, not the WhatsApp ID)"),
+  service: z.string().min(2).describe('The service the client is booking, e.g. "Женская стрижка"'),
   requestedStartAt: z.string().describe('ISO 8601 datetime for the requested appointment start, in the tenant timezone'),
 });
 
-export function bookAppointmentTool(tenant: TenantContext, conversationId: string, clientPhone: string) {
+export function bookAppointmentTool(tenant: TenantContext, conversationId: string) {
   return tool({
     description:
       "Book a 60-minute appointment on the specialist's Google Calendar for the given client at the requested time. " +
-      'Call this only after the client has explicitly confirmed a specific date and time. ' +
+      'Call this only after the client has explicitly confirmed a specific date and time AND has given you their name, ' +
+      'their phone number and the service. If any of these is missing, ask the client for it first instead of calling this tool. ' +
       'If the tool reports the slot is busy, propose a different time to the client instead of calling it again immediately.',
     parameters: inputSchema,
-    execute: async ({ clientName, requestedStartAt }) => {
+    execute: async ({ clientName, clientPhone, service, requestedStartAt }) => {
       const auth = await getAuthorizedClient(tenant.id);
       if (!auth) {
         return { ok: false, reason: 'not_connected' as const };
@@ -36,6 +42,7 @@ export function bookAppointmentTool(tenant: TenantContext, conversationId: strin
         const googleEventId = await createBookingEvent(auth.client, auth.calendarId, {
           clientName,
           clientPhone,
+          service,
           startAt,
           endAt,
           timezone: tenant.timezone,

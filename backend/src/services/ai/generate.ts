@@ -31,8 +31,8 @@ function systemMessage(tenant: TenantContext, ragContext: string, isFirstMessage
   const now = new Date().toLocaleString('ru-RU', { timeZone: tenant.timezone });
   let sys = tenant.aiPersona || 'You are a helpful assistant for a small business.';
   sys += `\n\nCurrent time: ${now}\nTimezone: ${tenant.timezone}`;
-  sys += `\n\nIMPORTANT RULE: Never ask the client questions. Only answer what they ask. If the client's message is unclear, give the most helpful answer you can based on what you know — do not ask clarifying questions back.`;
-  sys += `\n\nYou can book appointments directly using the book_appointment tool once the client has confirmed a specific date and time. Every appointment is exactly 60 minutes. If the tool says the slot is taken, suggest a different time instead of retrying the same slot.`;
+  sys += `\n\nIMPORTANT RULE: Do not ask the client unnecessary questions. Only answer what they ask. If the client's message is unclear, give the most helpful answer you can based on what you know. The only exception: when the client wants to book an appointment, you MUST ask for any missing booking details (see below), and you may ask other questions that your persona instructions explicitly require.`;
+  sys += `\n\nYou can book appointments directly using the book_appointment tool once the client has confirmed a specific date and time and you have their name, their phone number and the service. If any of these is missing, ask the client for it before booking — never invent or guess them. Every appointment is exactly 60 minutes. If the tool says the slot is taken, suggest a different time instead of retrying the same slot.`;
   sys += isFirstMessage
     ? `\n\nIMPORTANT RULE: This is the first message in the conversation — greet the client briefly.`
     : `\n\nIMPORTANT RULE: This is NOT the first message in the conversation — do NOT greet the client again (no "Здравствуйте"/"Сәлеметсіз бе" etc.), answer the question directly.`;
@@ -161,7 +161,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
 
   const tools =
     conversationId && clientPhone
-      ? { book_appointment: bookAppointmentTool(tenant, conversationId, clientPhone) }
+      ? { book_appointment: bookAppointmentTool(tenant, conversationId) }
       : undefined;
 
   // 2. Vision fallback (if image and text model can't handle vision natively)
