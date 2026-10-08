@@ -8,6 +8,7 @@ import { setStatus } from '../../services/conversations/stateMachine.js';
 import { dropBuffer } from '../../services/inboundBuffer/buffer.js';
 import { appendMessage } from '../../services/conversations/store.js';
 import { emitToTenant } from '../../services/realtime/socketRooms.js';
+import { scheduleFollowups } from '../../services/followup/scheduler.js';
 
 export const tenantInboxRouter = Router();
 tenantInboxRouter.use(requireAuth, tenantIsolation);
@@ -83,6 +84,7 @@ tenantInboxRouter.post('/conversations/:id/reply', async (req, res) => {
     sentBy: req.user!.userId,
     content: parsed.data.text,
   });
+  await scheduleFollowups(tenantId, conv.id, conv.contactIdentifier);
   res.json({ ok: true });
 });
 

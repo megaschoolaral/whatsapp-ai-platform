@@ -45,6 +45,95 @@ export function PersonaPage() {
   );
 }
 
+// FOLLOW-UPS
+interface FollowupSettings {
+  enabled: boolean;
+  delay1hMinutes: number;
+  delay2hMinutes: number;
+  message1Text: string;
+  message2Text: string;
+}
+export function FollowupsPage() {
+  const [settings, setSettings] = useState<FollowupSettings>({
+    enabled: false,
+    delay1hMinutes: 60,
+    delay2hMinutes: 720,
+    message1Text: '',
+    message2Text: '',
+  });
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    apiRequest<FollowupSettings>('/tenant/followups').then(setSettings);
+  }, []);
+  const save = async () => {
+    setLoading(true);
+    try {
+      const saved = await apiRequest<FollowupSettings>('/tenant/followups', {
+        method: 'PUT',
+        body: settings,
+      });
+      setSettings(saved);
+      toast.success('Сохранено');
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Follow-up хабарламалар</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={settings.enabled}
+            onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
+          />
+          <span>Қосу</span>
+        </label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>1-ші follow-up (минут)</Label>
+            <Input
+              type="number"
+              min={1}
+              value={settings.delay1hMinutes}
+              onChange={(e) => setSettings({ ...settings, delay1hMinutes: Number(e.target.value) })}
+            />
+            <Textarea
+              rows={3}
+              placeholder="Хабар мәтіні"
+              value={settings.message1Text}
+              onChange={(e) => setSettings({ ...settings, message1Text: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>2-ші follow-up (минут)</Label>
+            <Input
+              type="number"
+              min={1}
+              value={settings.delay2hMinutes}
+              onChange={(e) => setSettings({ ...settings, delay2hMinutes: Number(e.target.value) })}
+            />
+            <Textarea
+              rows={3}
+              placeholder="Хабар мәтіні"
+              value={settings.message2Text}
+              onChange={(e) => setSettings({ ...settings, message2Text: e.target.value })}
+            />
+          </div>
+        </div>
+        <Button onClick={save} disabled={loading}>
+          Сохранить
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 // MODELS
 export function ModelsPage() {
   const [catalog, setCatalog] = useState<any | null>(null);

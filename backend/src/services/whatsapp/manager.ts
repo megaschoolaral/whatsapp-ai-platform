@@ -31,3 +31,18 @@ export function removeSession(tenantId: string): void {
 export function listSessions(): Array<{ tenantId: string; status: SessionEntry['status'] }> {
   return Array.from(sessions.entries()).map(([tenantId, e]) => ({ tenantId, status: e.status }));
 }
+
+/**
+ * Detach and close every live socket without logging out (creds stay valid).
+ * Sessions are removed from the map first so late `close` events are ignored as stale.
+ */
+export function closeAllSessions(): void {
+  for (const [tenantId, entry] of Array.from(sessions.entries())) {
+    sessions.delete(tenantId);
+    try {
+      entry.sock.end(undefined);
+    } catch {
+      /* ignore */
+    }
+  }
+}

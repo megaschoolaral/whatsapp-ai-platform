@@ -1,6 +1,7 @@
 import { prisma } from '../../prisma.js';
 import type { ConversationStatus } from '@prisma/client';
 import { emitToTenant } from '../realtime/socketRooms.js';
+import { cancelFollowups } from '../followup/scheduler.js';
 
 export async function setStatus(
   conversationId: string,
@@ -16,6 +17,9 @@ export async function setStatus(
       lastHumanActivityAt: status === 'human_active' ? new Date() : undefined,
     },
   });
+  if (status === 'human_active' || status === 'resolved') {
+    await cancelFollowups(conv.tenantId, conversationId);
+  }
   emitToTenant(conv.tenantId, 'conversation:updated', {
     conversationId,
     status,

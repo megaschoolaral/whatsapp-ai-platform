@@ -11,6 +11,7 @@ import { StepModels } from './steps/StepModels';
 import { StepPersona } from './steps/StepPersona';
 import { StepWhatsapp } from './steps/StepWhatsapp';
 import { StepKnowledge } from './steps/StepKnowledge';
+import { StepFollowups } from './steps/StepFollowups';
 
 interface OnboardingState {
   status: 'pending_setup' | 'active' | 'suspended';
@@ -183,6 +184,18 @@ export function OnboardingChecklistPage() {
           </div>
         </CardContent>
       </Card>
+
+      {tenantId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Follow-up хабарламалар</CardTitle>
+            <CardDescription>Клиент жауап бермесе, автоматты еске салу хабарламалары.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <StepFollowups tenantId={tenantId} />
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

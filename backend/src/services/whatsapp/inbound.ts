@@ -9,6 +9,7 @@ import { transcribe } from '../stt/index.js';
 import { loadTenantContext } from '../tenantContext.js';
 import { emitToTenant } from '../realtime/socketRooms.js';
 import { setStatus } from '../conversations/stateMachine.js';
+import { cancelFollowups } from '../followup/scheduler.js';
 
 type Sock = ReturnType<typeof makeWASocket>;
 
@@ -110,6 +111,12 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
     transcribedText,
     whatsappMsgId: msg.key.id ?? null,
   });
+
+  await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: { lastInboundMessageAt: new Date() },
+  });
+  await cancelFollowups(tenantId, conversation.id);
 
   emitToTenant(tenantId, 'message:new', {
     conversationId: conversation.id,

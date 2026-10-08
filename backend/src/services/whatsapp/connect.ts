@@ -6,7 +6,7 @@ import makeWASocket, {
 import type { Boom } from '@hapi/boom';
 import { logger } from '../../logger.js';
 import { prisma } from '../../prisma.js';
-import { makeDbAuthState } from './sessionStore.js';
+import { makeDbAuthState, flushAuthKeys } from './sessionStore.js';
 import { setSession, updateSession, getSession, removeSession } from './manager.js';
 import { emitToTenant } from '../realtime/socketRooms.js';
 import { handleIncomingMessage, handleOutgoingFromPhone } from './inbound.js';
@@ -33,6 +33,15 @@ export async function connectTenant(tenantId: string): Promise<void> {
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
+    // Ignore late events from a stale socket (e.g. after a 515 restart or re-pair):
+    // otherwise its `close` would tear down the live session and spawn a duplicate
+    // socket, and the two would kick each other with `conflict: replaced`.
+    if (getSession(tenantId)?.sock !== sock) {
+      if (connection === 'close') {
+        logger.info({ tenantId }, '[whatsapp] ignoring close from stale socket');
+      }
+      return;
+    }
     if (qr) {
       updateSession(tenantId, { status: 'qr', lastQr: qr });
       await prisma.whatsappSession.update({ where: { tenantId }, data: { status: 'qr' } }).catch(() => undefined);
@@ -75,6 +84,7 @@ export async function connectTenant(tenantId: string): Promise<void> {
     if (connection === 'close') {
       const reason = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
       logger.warn({ tenantId, reason }, '[whatsapp] connection closed');
+      await flushAuthKeys(tenantId).catch((err) => logger.error({ err, tenantId }, '[whatsapp] auth key flush failed'));
       await prisma.whatsappSession.update({
         where: { tenantId },
         data: { status: 'disconnected', lastDisconnectReason: String(reason ?? 'unknown') },

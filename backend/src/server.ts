@@ -13,6 +13,8 @@ import { bootstrapSuperAdmin } from './bootstrap/superAdmin.js';
 import { startWorkers } from './queues/workers.js';
 import { setIo } from './services/realtime/socketRooms.js';
 import { connectTenant } from './services/whatsapp/connect.js';
+import { closeAllSessions } from './services/whatsapp/manager.js';
+import { flushAllAuthKeys } from './services/whatsapp/sessionStore.js';
 import { verifyToken } from './auth/jwt.js';
 
 import { healthRouter } from './routes/health.js';
@@ -23,6 +25,7 @@ import { adminTenantModelsRouter } from './routes/admin/tenantModels.js';
 import { adminTenantPersonaRouter } from './routes/admin/tenantPersona.js';
 import { adminTenantWhatsappRouter } from './routes/admin/tenantWhatsapp.js';
 import { adminTenantKnowledgeRouter } from './routes/admin/tenantKnowledge.js';
+import { adminTenantFollowupsRouter } from './routes/admin/tenantFollowups.js';
 import { adminUsageRouter } from './routes/admin/usage.js';
 import { tenantInboxRouter } from './routes/tenant/inbox.js';
 import { tenantSettingsRouter } from './routes/tenant/settings.js';
@@ -48,6 +51,7 @@ function buildApp(): Express {
   app.use('/api/admin/tenants/:tenantId/persona', adminTenantPersonaRouter);
   app.use('/api/admin/tenants/:tenantId/whatsapp', adminTenantWhatsappRouter);
   app.use('/api/admin/tenants/:tenantId/knowledge', adminTenantKnowledgeRouter);
+  app.use('/api/admin/tenants/:tenantId/followups', adminTenantFollowupsRouter);
   app.use('/api/admin/usage', adminUsageRouter);
 
   // Mounted before the broader '/api/tenant' routers below: those apply a blanket
@@ -129,6 +133,8 @@ async function main() {
   const shutdown = async () => {
     logger.info('[server] shutting down');
     server.close();
+    closeAllSessions();
+    await flushAllAuthKeys();
     await prisma.$disconnect();
     process.exit(0);
   };
