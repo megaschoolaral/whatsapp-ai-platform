@@ -84,6 +84,11 @@ export async function flushBuffer(tenantId: string, jid: string): Promise<void> 
     return;
   }
 
+  if (!reply.text.trim()) {
+    logger.warn({ tenantId, conversationId }, '[flush] AI returned an empty reply, not sending');
+    return;
+  }
+
   // An operator may have taken over while the AI reply was being generated.
   if (await isHumanInControl(tenantId, conversationId)) {
     logger.info({ tenantId, conversationId }, '[flush] human took over during generation, dropping AI reply');

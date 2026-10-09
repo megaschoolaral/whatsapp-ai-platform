@@ -3,6 +3,7 @@ import { resolveTextModel, resolveVisionModel } from './providers.js';
 import { logTextUsage, logVisionUsage } from './usageLog.js';
 import { queryCorpus } from './rag.js';
 import { prisma } from '../../prisma.js';
+import { logger } from '../../logger.js';
 import { bookAppointmentTool } from './tools/bookAppointment.js';
 import { checkAvailabilityTool } from './tools/checkAvailability.js';
 import { formatLocalDate } from '../calendar/timeUtils.js';
@@ -85,19 +86,28 @@ interface TextModel {
  * of relying on that continuation, we do our own plain-text follow-up call: no functionCall/
  * functionResponse parts involved, so the thought_signature requirement never applies.
  */
+type ToolSet = Parameters<typeof generateText>[0]['tools'];
+
+const MAX_TOOL_ROUNDS = 2;
+
 async function resolveToolFollowUp(
   tenant: TenantContext,
   textModel: TextModel,
   ragContext: string,
   userMessage: string,
   history: ChatTurn[],
-  result: { text: string; toolResults?: Array<{ toolName: string; result: unknown }>; usage?: { promptTokens?: number; completionTokens?: number } },
+  result: { text: string; finishReason?: string; toolResults?: Array<{ toolName: string; result: unknown }>; usage?: { promptTokens?: number; completionTokens?: number } },
   isFirstMessage: boolean,
+  tools: ToolSet,
   conversationId?: string | null,
+  round = 0,
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const booking = result.toolResults?.find((r) => r.toolName === 'book_appointment');
   const availability = result.toolResults?.find((r) => r.toolName === 'check_availability');
   if (!booking && !availability) {
+    if (result.finishReason === 'error') {
+      logger.warn({ tenantId: tenant.id, conversationId }, '[generate] model call finished with error');
+    }
     return {
       text: stripRepeatedGreeting(result.text, isFirstMessage),
       inputTokens: result.usage?.promptTokens ?? 0,
@@ -122,20 +132,23 @@ async function resolveToolFollowUp(
           a.busy.length ? a.busy.map((b) => `${b.from}-${b.to}`).join(', ') : 'nothing'
         }. Free ${a.slotMinutes}-minute start times: ${
           a.freeStartTimes.length ? a.freeStartTimes.join(', ') : 'none'
-        }. If the time the client asked for is in the free list, it is free: continue with the booking steps (ask for any missing name, phone, service). If it is not, say it is taken and offer the 2-3 nearest free times from the list. If nothing is free, say so and offer another day. Never invent times that are not in the list. Reply in the client's language.]`
+        }. No appointment has been created yet, so never say that the appointment is booked at this point. If the time the client asked for is NOT in the free list, say it is taken and offer the 2-3 nearest free times from the list (or another day if nothing is free). If it IS free: if the client has already given their name, phone number and the service, call book_appointment now; otherwise ask only for the missing details. Never invent times that are not in the list. Reply in the client's language.]`
       : a.reason === 'invalid_input'
         ? `[System note: the date could not be understood. Ask the client for the exact date, in their language.]`
         : `[System note: the calendar could not be read right now due to a technical problem. Apologize briefly and ask the client to try again in a few minutes. Do not mention any manager. Reply in their language.]`;
   }
 
+  // Tools stay available only while we may still need a booking after an availability check.
+  const allowTools = !!availability && !booking && round + 1 < MAX_TOOL_ROUNDS;
   const followUp = await generateText({
     model: textModel.sdkModel,
+    // History as chat turns + ONE final user turn: two consecutive user turns after history make Gemini return an empty error response.
     messages: [
       { role: 'system', content: systemMessage(tenant, ragContext, isFirstMessage, true) },
       ...history.map<CoreMessage>((h) => ({ role: h.role, content: h.content })),
-      { role: 'user', content: userMessage },
-      { role: 'user', content: note },
+      { role: 'user', content: `${userMessage}\n\n${note}` },
     ] as CoreMessage[],
+    tools: allowTools ? tools : undefined,
   });
 
   await logTextUsage({
@@ -147,10 +160,29 @@ async function resolveToolFollowUp(
     conversationId,
   });
 
+  const usedIn = (result.usage?.promptTokens ?? 0) + (followUp.usage?.promptTokens ?? 0);
+  const usedOut = (result.usage?.completionTokens ?? 0) + (followUp.usage?.completionTokens ?? 0);
+
+  if (followUp.toolResults?.length) {
+    const next = await resolveToolFollowUp(
+      tenant,
+      textModel,
+      ragContext,
+      userMessage,
+      history,
+      followUp,
+      isFirstMessage,
+      tools,
+      conversationId,
+      round + 1,
+    );
+    return { text: next.text, inputTokens: usedIn + next.inputTokens, outputTokens: usedOut + next.outputTokens };
+  }
+
   return {
     text: stripRepeatedGreeting(followUp.text, isFirstMessage),
-    inputTokens: (result.usage?.promptTokens ?? 0) + (followUp.usage?.promptTokens ?? 0),
-    outputTokens: (result.usage?.completionTokens ?? 0) + (followUp.usage?.completionTokens ?? 0),
+    inputTokens: usedIn,
+    outputTokens: usedOut,
   };
 }
 
@@ -230,7 +262,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
         outputTokens: result.usage?.completionTokens ?? 0,
         conversationId,
       });
-      const final = await resolveToolFollowUp(tenant, textModel, ragContext, userMessage, history, result, history.length === 0, conversationId);
+      const final = await resolveToolFollowUp(tenant, textModel, ragContext, userMessage, history, result, history.length === 0, tools, conversationId);
       return { ...final, ragUsed: !!ragContext };
     }
     // Fallback: describe via vision model and append
@@ -254,6 +286,6 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     conversationId,
   });
 
-  const final = await resolveToolFollowUp(tenant, textModel, ragContext, userMessage, history, result, history.length === 0, conversationId);
+  const final = await resolveToolFollowUp(tenant, textModel, ragContext, userMessage, history, result, history.length === 0, tools, conversationId);
   return { ...final, ragUsed: !!ragContext };
 }
