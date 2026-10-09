@@ -87,3 +87,57 @@ export async function createBookingEvent(
   if (!res.data.id) throw new Error('Google Calendar did not return an event id');
   return res.data.id;
 }
+
+/**
+ * True if no OTHER event overlaps [startAt, endAt). Used when moving an existing booking, so the
+ * booking's own old slot doesn't count as busy.
+ */
+export async function isSlotFreeExcluding(
+  client: CalendarOAuth2Client,
+  calendarId: string,
+  excludeEventId: string,
+  startAt: Date,
+  endAt: Date,
+): Promise<boolean> {
+  const calendar = google.calendar({ version: 'v3', auth: client });
+  const res = await calendar.events.list({
+    calendarId,
+    timeMin: startAt.toISOString(),
+    timeMax: endAt.toISOString(),
+    singleEvents: true,
+    maxResults: 50,
+  });
+  const clash = (res.data.items ?? []).some(
+    (e) => e.id !== excludeEventId && e.status !== 'cancelled' && e.transparency !== 'transparent',
+  );
+  return !clash;
+}
+
+export async function moveBookingEvent(
+  client: CalendarOAuth2Client,
+  calendarId: string,
+  eventId: string,
+  args: { startAt: Date; endAt: Date; timezone: string },
+): Promise<void> {
+  const calendar = google.calendar({ version: 'v3', auth: client });
+  await calendar.events.patch({
+    calendarId,
+    eventId,
+    requestBody: {
+      start: { dateTime: args.startAt.toISOString(), timeZone: args.timezone },
+      end: { dateTime: args.endAt.toISOString(), timeZone: args.timezone },
+    },
+  });
+}
+
+/** Deletes the Google event; an already-deleted event (404/410) counts as success. */
+export async function deleteBookingEvent(client: CalendarOAuth2Client, calendarId: string, eventId: string): Promise<void> {
+  const calendar = google.calendar({ version: 'v3', auth: client });
+  try {
+    await calendar.events.delete({ calendarId, eventId });
+  } catch (err) {
+    const code = (err as { code?: number }).code;
+    if (code === 404 || code === 410) return;
+    throw err;
+  }
+}
