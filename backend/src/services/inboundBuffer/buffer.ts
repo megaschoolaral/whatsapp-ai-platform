@@ -12,6 +12,8 @@ interface BufferedMessage {
   imageBase64?: string | null;
   imageMimeType?: string | null;
   whatsappMsgId?: string | null;
+  /** DB Message.id of the stored incoming message */
+  messageId?: string | null;
   fromMeKey?: object;
   ts: number;
 }
@@ -31,6 +33,7 @@ export async function appendToBuffer(args: {
   imageBase64?: string | null;
   imageMimeType?: string | null;
   msgKey?: object;
+  messageId?: string | null;
   mediaSize?: number | null;
 }): Promise<void> {
   const k = bufferKey(args.tenantId, args.contactJid);
@@ -40,6 +43,7 @@ export async function appendToBuffer(args: {
     imageBase64: args.imageBase64 ?? null,
     imageMimeType: args.imageMimeType ?? null,
     whatsappMsgId: null,
+    messageId: args.messageId ?? null,
     fromMeKey: args.msgKey,
     ts: Date.now(),
   };
@@ -77,20 +81,33 @@ export async function extendBufferTimer(
   await scheduleFlush(tenantId, jid, Math.min(wait, HARD_CAP_MS - age));
 }
 
-async function scheduleFlush(tenantId: string, jid: string, delayMs: number): Promise<void> {
-  const jobId = `${tenantId}__${jid.replace(/:/g, '_')}`;
-  // Remove existing job to keep only the latest timer
+function jobKey(tenantId: string, jid: string): string {
+  return `wa:buffer:job:${tenantId}:${jid}`;
+}
+
+/** Remove the pending (delayed) flush job for this contact, if any. Active jobs can't be removed — that's fine. */
+async function removePendingJob(tenantId: string, jid: string): Promise<void> {
   try {
-    const existing = await inboundFlushQueue.getJob(jobId);
+    const prevId = await redis.get(jobKey(tenantId, jid));
+    if (!prevId) return;
+    const existing = await inboundFlushQueue.getJob(prevId);
     if (existing) await existing.remove();
   } catch {
-    /* ignore */
+    /* active/locked job — leave it */
   }
+}
+
+export async function scheduleFlush(tenantId: string, jid: string, delayMs: number): Promise<void> {
+  await removePendingJob(tenantId, jid);
+  // Unique id per schedule: a fixed id made BullMQ silently drop the new job
+  // while the previous one was still active, leaving the message unanswered.
+  const jobId = `${tenantId}__${jid.replace(/:/g, '_')}__${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   await inboundFlushQueue.add(
     inboundFlushJobName,
     { tenantId, jid },
     { delay: Math.max(0, delayMs), jobId, removeOnComplete: 100, removeOnFail: 50 },
   );
+  await redis.set(jobKey(tenantId, jid), jobId, 'EX', 600);
 }
 
 export async function readAndClearBuffer(
@@ -112,14 +129,7 @@ export async function readAndClearBuffer(
 }
 
 export async function dropBuffer(tenantId: string, jid: string): Promise<void> {
-  const k = bufferKey(tenantId, jid);
-  const meta = metaKey(tenantId, jid);
-  await redis.del(k, meta);
-  const jobId = `${tenantId}__${jid.replace(/:/g, '_')}`;
-  try {
-    const existing = await inboundFlushQueue.getJob(jobId);
-    if (existing) await existing.remove();
-  } catch {
-    /* ignore */
-  }
+  await redis.del(bufferKey(tenantId, jid), metaKey(tenantId, jid));
+  await removePendingJob(tenantId, jid);
+  await redis.del(jobKey(tenantId, jid));
 }

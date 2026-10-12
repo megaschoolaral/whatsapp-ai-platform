@@ -1,6 +1,7 @@
 import { logger } from '../../logger.js';
 import { prisma } from '../../prisma.js';
-import { readAndClearBuffer } from './buffer.js';
+import { readAndClearBuffer, scheduleFlush } from './buffer.js';
+import { redis } from '../../redis.js';
 import { loadTenantContext } from '../tenantContext.js';
 import { generateReply, type ChatTurn } from '../ai/generate.js';
 import { getConversationHistory, appendMessage } from '../conversations/store.js';
@@ -11,7 +12,26 @@ import { getSession } from '../whatsapp/manager.js';
 import { emitToTenant } from '../realtime/socketRooms.js';
 import { scheduleFollowups } from '../followup/scheduler.js';
 
+const FLUSH_LOCK_TTL_S = 180;
+const FLUSH_BUSY_RETRY_MS = 5_000;
+
 export async function flushBuffer(tenantId: string, jid: string): Promise<void> {
+  // One flush per contact at a time; if a reply is still being generated/typed,
+  // leave the buffer untouched and retry shortly so new messages aren't lost or answered out of order.
+  const lockKey = `wa:flushing:${tenantId}:${jid}`;
+  const got = await redis.set(lockKey, '1', 'EX', FLUSH_LOCK_TTL_S, 'NX');
+  if (!got) {
+    await scheduleFlush(tenantId, jid, FLUSH_BUSY_RETRY_MS);
+    return;
+  }
+  try {
+    await flushBufferLocked(tenantId, jid);
+  } finally {
+    await redis.del(lockKey).catch(() => undefined);
+  }
+}
+
+async function flushBufferLocked(tenantId: string, jid: string): Promise<void> {
   const { messages, conversationId } = await readAndClearBuffer(tenantId, jid);
   if (!messages.length || !conversationId) return;
 
@@ -39,8 +59,13 @@ export async function flushBuffer(tenantId: string, jid: string): Promise<void> 
 
   // History from DB (excluding the messages we just stored — they'll be in DB already as incoming)
   const dbHistory = await getConversationHistory(conversationId, 30);
-  const history: ChatTurn[] = dbHistory
-    .slice(0, -messages.length) // all buffered messages are in DB; exclude them from history to avoid duplicating in AI prompt
+  // Buffered messages are already in DB; exclude them (by id) so they aren't duplicated in the prompt.
+  const bufferedIds = new Set(messages.map((m) => m.messageId).filter((id): id is string => !!id));
+  const priorHistory =
+    bufferedIds.size > 0
+      ? dbHistory.filter((m) => !bufferedIds.has(m.id))
+      : dbHistory.slice(0, Math.max(0, dbHistory.length - messages.length)); // legacy buffer entries without ids
+  const history: ChatTurn[] = priorHistory
     .map((m) => ({
       role: m.direction === 'incoming' ? ('user' as const) : ('assistant' as const),
       content: m.transcribedText ?? m.content ?? '',

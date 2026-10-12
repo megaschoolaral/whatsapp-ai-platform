@@ -60,10 +60,11 @@ export async function appendMessage(args: {
 }
 
 export async function getConversationHistory(conversationId: string, limit = 20) {
+  // Latest `limit` messages, returned oldest-first.
   const rows = await prisma.message.findMany({
     where: { conversationId },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { createdAt: 'desc' },
     take: limit,
   });
-  return rows;
+  return rows.reverse();
 }

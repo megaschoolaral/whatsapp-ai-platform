@@ -101,7 +101,7 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
     }
   }
 
-  await appendMessage({
+  const stored = await appendMessage({
     tenantId,
     conversationId: conversation.id,
     direction: 'incoming',
@@ -145,6 +145,7 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
     imageBase64,
     imageMimeType,
     msgKey: msg.key,
+    messageId: stored.id,
     mediaSize: mediaDescriptor?.size ?? null,
   });
 }
