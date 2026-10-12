@@ -21,11 +21,23 @@ adminTenantsRouter.get('/', async (_req, res) => {
   res.json(tenants);
 });
 
+const timezoneSchema = z.string().refine(
+  (tz) => {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone: tz });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  { message: 'Invalid timezone' },
+);
+
 const createSchema = z.object({
   name: z.string().min(1),
   contactEmail: z.string().email().optional(),
   industry: z.string().optional(),
-  timezone: z.string().default('Asia/Almaty'),
+  timezone: timezoneSchema.default('Asia/Almaty'),
   ownerEmail: z.string().email(),
   ownerPassword: z.string().min(8),
 });
@@ -88,8 +100,8 @@ const patchSchema = z.object({
   name: z.string().min(1).optional(),
   contactEmail: z.string().email().nullable().optional(),
   industry: z.string().nullable().optional(),
-  timezone: z.string().optional(),
-  aiPersona: z.string().optional(),
+  timezone: timezoneSchema.optional(),
+  aiPersona: z.string().max(20000).optional(),
 });
 adminTenantsRouter.patch('/:tenantId', async (req, res) => {
   const parsed = patchSchema.safeParse(req.body);

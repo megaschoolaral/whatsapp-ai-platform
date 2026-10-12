@@ -12,3 +12,6 @@ backend/dist
 frontend/dist
 backend/prisma/dev.db*
 .turbo
+
+# TypeScript incremental build info
+*.tsbuildinfo

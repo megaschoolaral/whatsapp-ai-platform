@@ -10,10 +10,12 @@ export async function downloadMedia(message: WAMessage): Promise<Buffer | null> 
   }
 }
 
-export async function compressImage(buf: Buffer): Promise<Buffer> {
+/** Returns the (re-encoded) image and its real MIME type: compressed output is always JPEG. */
+export async function compressImage(buf: Buffer, originalMime: string): Promise<{ buffer: Buffer; mimeType: string }> {
   try {
-    return await sharp(buf).resize({ width: 1024, withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+    const buffer = await sharp(buf).resize({ width: 1024, withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+    return { buffer, mimeType: 'image/jpeg' };
   } catch {
-    return buf;
+    return { buffer: buf, mimeType: originalMime };
   }
 }

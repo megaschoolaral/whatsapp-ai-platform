@@ -70,11 +70,17 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
     /* ignore */
   }
 
-  const conversation = await upsertConversation({
+  let conversation = await upsertConversation({
     tenantId,
     contactIdentifier: jid,
     contactName: msg.pushName ?? null,
   });
+
+  // A customer writing into a resolved conversation reopens it (otherwise the AI replies while it still shows "resolved").
+  if (conversation.status === 'resolved') {
+    await setStatus(conversation.id, 'ai_active');
+    conversation = { ...conversation, status: 'ai_active' };
+  }
 
   // WhatsApp can redeliver the same message; skip if already stored.
   if (msg.key.id) {
@@ -95,9 +101,9 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
     if (buf) {
       mediaDescriptor = { type: mediaType, size: buf.byteLength };
       if (mediaType === 'image') {
-        const compressed = await compressImage(buf);
-        imageBase64 = compressed.toString('base64');
-        imageMimeType = msg.message?.imageMessage?.mimetype ?? 'image/jpeg';
+        const compressed = await compressImage(buf, msg.message?.imageMessage?.mimetype ?? 'image/jpeg');
+        imageBase64 = compressed.buffer.toString('base64');
+        imageMimeType = compressed.mimeType;
       } else if (mediaType === 'audio') {
         const tenant = await loadTenantContext(tenantId);
         if (tenant) {

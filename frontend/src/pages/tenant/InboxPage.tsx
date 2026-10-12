@@ -44,6 +44,9 @@ export function InboxPage() {
   const [reply, setReply] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Socket handlers are registered once per filter change; read the current chat through a ref
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = activeId;
 
   const loadConversations = async () => {
     const data = await apiRequest<Conversation[]>('/tenant/conversations', {
@@ -65,7 +68,7 @@ export function InboxPage() {
     const sock = connectSocket(token, tenantId);
     sock.on('message:new', (payload: { conversationId: string }) => {
       loadConversations();
-      if (activeId === payload.conversationId) loadMessages(payload.conversationId);
+      if (activeIdRef.current === payload.conversationId) loadMessages(payload.conversationId);
     });
     sock.on('conversation:updated', () => loadConversations());
     return () => disconnectSocket();

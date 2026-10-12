@@ -19,7 +19,7 @@ tenantSettingsRouter.get('/persona', async (req, res) => {
   res.json({ aiPersona: t?.aiPersona ?? '' });
 });
 tenantSettingsRouter.put('/persona', async (req, res) => {
-  const parsed = z.object({ aiPersona: z.string() }).safeParse(req.body);
+  const parsed = z.object({ aiPersona: z.string().max(20000) }).safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid input' });
     return;

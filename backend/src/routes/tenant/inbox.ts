@@ -39,12 +39,18 @@ tenantInboxRouter.get('/conversations/:id/messages', async (req, res) => {
     res.status(404).json({ error: 'Not found' });
     return;
   }
-  const messages = await prisma.message.findMany({
-    where: { conversationId: conv.id },
-    orderBy: { createdAt: 'asc' },
-    take: 200,
-  });
-  res.json({ conversation: conv, messages });
+  // Latest 200 messages, oldest first
+  const messages = (
+    await prisma.message.findMany({
+      where: { conversationId: conv.id },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    })
+  ).reverse();
+  if (conv.unreadCount > 0) {
+    await prisma.conversation.update({ where: { id: conv.id }, data: { unreadCount: 0 } });
+  }
+  res.json({ conversation: { ...conv, unreadCount: 0 }, messages });
 });
 
 const replySchema = z.object({ text: z.string().min(1).max(4000) });
