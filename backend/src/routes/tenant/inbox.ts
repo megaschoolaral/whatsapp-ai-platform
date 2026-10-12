@@ -15,9 +15,17 @@ tenantInboxRouter.use(requireAuth, tenantIsolation);
 
 tenantInboxRouter.get('/conversations', async (req, res) => {
   const tenantId = req.tenantScope!;
-  const status = req.query.status as string | undefined;
+  const statusParsed = z
+    .enum(['ai_active', 'human_active', 'awaiting_human', 'resolved'])
+    .optional()
+    .safeParse(req.query.status || undefined);
+  if (!statusParsed.success) {
+    res.status(400).json({ error: 'Invalid status' });
+    return;
+  }
+  const status = statusParsed.data;
   const conversations = await prisma.conversation.findMany({
-    where: { tenantId, ...(status ? { status: status as any } : {}) },
+    where: { tenantId, ...(status ? { status } : {}) },
     orderBy: { lastMessageAt: 'desc' },
     take: 100,
   });

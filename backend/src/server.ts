@@ -1,3 +1,4 @@
+import 'express-async-errors';
 import express, { type Express } from 'express';
 import http from 'node:http';
 import path from 'node:path';
@@ -136,6 +137,14 @@ async function main() {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
+
+// Last-resort guards: one bad request or WhatsApp event must not take down every tenant.
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, '[process] unhandledRejection');
+});
+process.on('uncaughtException', (err) => {
+  logger.error({ err }, '[process] uncaughtException');
+});
 
 main().catch((err) => {
   // eslint-disable-next-line no-console

@@ -31,7 +31,7 @@ export async function connectTenant(tenantId: string): Promise<void> {
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', async (update) => {
+  const onConnectionUpdate = async (update: Partial<import('baileys').ConnectionState>) => {
     const { connection, lastDisconnect, qr } = update;
     // Ignore late events from a stale socket (e.g. after a 515 restart or re-pair):
     // otherwise its `close` would tear down the live session and spawn a duplicate
@@ -121,6 +121,9 @@ export async function connectTenant(tenantId: string): Promise<void> {
         }
       }
     }
+  };
+  sock.ev.on('connection.update', (update) => {
+    onConnectionUpdate(update).catch((err) => logger.error({ err, tenantId }, '[whatsapp] connection.update handler error'));
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
