@@ -13,6 +13,12 @@ import { cancelFollowups } from '../followup/scheduler.js';
 
 type Sock = ReturnType<typeof makeWASocket>;
 
+/** Only 1:1 chats are handled; groups, `status@broadcast`, broadcast lists and newsletters are ignored. */
+function isDirectChatJid(jid: string | null | undefined): jid is string {
+  if (!jid) return false;
+  return !(jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.endsWith('@newsletter'));
+}
+
 function extractText(msg: WAMessage): string {
   const m = msg.message;
   if (!m) return '';
@@ -40,7 +46,7 @@ function detectMediaType(msg: WAMessage): 'image' | 'audio' | 'document' | null 
  */
 export async function handleOutgoingFromPhone(tenantId: string, msg: WAMessage): Promise<void> {
   const jid = msg.key.remoteJid;
-  if (!jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return;
+  if (!isDirectChatJid(jid)) return;
 
   const conversation = await prisma.conversation.findFirst({
     where: { tenantId, contactIdentifier: jid, status: 'ai_active' },
@@ -53,7 +59,7 @@ export async function handleOutgoingFromPhone(tenantId: string, msg: WAMessage):
 
 export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: WAMessage): Promise<void> {
   const jid = msg.key.remoteJid;
-  if (!jid || jid.endsWith('@g.us')) return; // skip groups for now
+  if (!isDirectChatJid(jid)) return; // skip groups, status updates, broadcast lists, channels
   const text = extractText(msg);
   const mediaType = detectMediaType(msg);
 
@@ -69,6 +75,15 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
     contactIdentifier: jid,
     contactName: msg.pushName ?? null,
   });
+
+  // WhatsApp can redeliver the same message; skip if already stored.
+  if (msg.key.id) {
+    const dup = await prisma.message.findFirst({
+      where: { conversationId: conversation.id, whatsappMsgId: msg.key.id },
+      select: { id: true },
+    });
+    if (dup) return;
+  }
 
   let imageBase64: string | null = null;
   let imageMimeType: string | null = null;

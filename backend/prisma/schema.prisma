@@ -192,6 +192,7 @@ model Message {
   whatsappMsgId     String?
   createdAt         DateTime          @default(now())
 
+  @@unique([conversationId, whatsappMsgId])
   @@index([conversationId, createdAt])
   @@index([tenantId, createdAt])
 }

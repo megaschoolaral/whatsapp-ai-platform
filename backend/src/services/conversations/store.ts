@@ -26,6 +26,22 @@ export async function upsertConversation(args: {
   });
 }
 
+/** Unique (conversationId, whatsappMsgId) may race with a parallel redelivery — treat that as "already stored". */
+async function createMessage(args: Parameters<typeof prisma.message.create>[0]): Promise<Message> {
+  try {
+    return await prisma.message.create(args);
+  } catch (err) {
+    const data = args.data as { conversationId?: string; whatsappMsgId?: string | null };
+    if ((err as { code?: string }).code === 'P2002' && data.conversationId && data.whatsappMsgId) {
+      const existing = await prisma.message.findFirst({
+        where: { conversationId: data.conversationId, whatsappMsgId: data.whatsappMsgId },
+      });
+      if (existing) return existing;
+    }
+    throw err;
+  }
+}
+
 export async function appendMessage(args: {
   tenantId: string;
   conversationId: string;
@@ -38,7 +54,7 @@ export async function appendMessage(args: {
   aiConfidence?: number | null;
   whatsappMsgId?: string | null;
 }): Promise<Message> {
-  const msg = await prisma.message.create({
+  const msg = await createMessage({
     data: {
       tenantId: args.tenantId,
       conversationId: args.conversationId,
