@@ -12,9 +12,32 @@ import { emitToTenant } from '../realtime/socketRooms.js';
 import { handleIncomingMessage, handleOutgoingFromPhone } from './inbound.js';
 import { handlePresenceUpdate } from './presence.js';
 
+const connecting = new Set<string>();
+
+/**
+ * Open a Baileys socket for the tenant. Concurrent calls (auto-reconnect + dashboard click)
+ * are collapsed: a second socket for the same tenant would kick the first with `conflict: replaced`.
+ */
 export async function connectTenant(tenantId: string): Promise<void> {
+  if (connecting.has(tenantId)) return;
+  connecting.add(tenantId);
+  try {
+    await connectTenantInner(tenantId);
+  } finally {
+    connecting.delete(tenantId);
+  }
+}
+
+async function connectTenantInner(tenantId: string): Promise<void> {
   const existing = getSession(tenantId);
   if (existing && existing.status !== 'closed') return;
+
+  // Don't (re)connect deleted or suspended tenants — also stops the reconnect-with-backoff loop for them.
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { status: true } });
+  if (!tenant || tenant.status === 'suspended') {
+    logger.info({ tenantId, status: tenant?.status ?? 'deleted' }, '[whatsapp] not connecting: tenant missing or suspended');
+    return;
+  }
 
   const { state, saveCreds } = await makeDbAuthState(tenantId);
   const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined as unknown as [number, number, number] }));

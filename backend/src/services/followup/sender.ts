@@ -16,6 +16,9 @@ export async function sendFollowup(
     return; // conversation moved on, nothing to do
   }
 
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { status: true } });
+  if (tenant?.status !== 'active') return; // suspended / not set up — don't message customers
+
   const settings = await prisma.tenantFollowupSettings.findUnique({ where: { tenantId } });
   if (!settings || !settings.enabled) return;
 

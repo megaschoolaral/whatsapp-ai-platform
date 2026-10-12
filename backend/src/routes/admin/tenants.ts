@@ -116,6 +116,8 @@ adminTenantsRouter.post('/:tenantId/reactivate', async (req, res) => {
     where: { id: req.params.tenantId },
     data: { status: 'active', suspendedAt: null, suspendedReason: null },
   });
+  // suspend() closed the WhatsApp socket; bring it back
+  connectTenant(req.params.tenantId).catch(() => undefined);
   res.json({ ok: true });
 });
 
