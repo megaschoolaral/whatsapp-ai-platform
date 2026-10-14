@@ -1,4 +1,5 @@
 import type makeWASocket from 'baileys';
+import { normalizeMessageContent } from 'baileys';
 import type { WAMessage } from 'baileys';
 import { prisma } from '../../prisma.js';
 import { logger } from '../../logger.js';
@@ -17,6 +18,18 @@ type Sock = ReturnType<typeof makeWASocket>;
 function isDirectChatJid(jid: string | null | undefined): jid is string {
   if (!jid) return false;
   return !(jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.endsWith('@newsletter'));
+}
+
+/** A customer replying to someone's WhatsApp Status arrives as a normal 1:1 message quoting `status@broadcast`. */
+function isReplyToStatus(msg: WAMessage): boolean {
+  const content = normalizeMessageContent(msg.message);
+  if (!content) return false;
+  return Object.values(content).some(
+    (part) =>
+      typeof part === 'object' &&
+      part !== null &&
+      (part as { contextInfo?: { remoteJid?: string | null } }).contextInfo?.remoteJid === 'status@broadcast',
+  );
 }
 
 function extractText(msg: WAMessage): string {
@@ -59,7 +72,14 @@ export async function handleOutgoingFromPhone(tenantId: string, msg: WAMessage):
 
 export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: WAMessage): Promise<void> {
   const jid = msg.key.remoteJid;
-  if (!isDirectChatJid(jid)) return; // skip groups, status updates, broadcast lists, channels
+  if (!isDirectChatJid(jid)) {
+    logger.info({ tenantId, jid }, '[inbound] ignored non-direct chat (group/status/broadcast/channel)');
+    return; // skip groups, status updates, broadcast lists, channels
+  }
+  if (isReplyToStatus(msg)) {
+    logger.info({ tenantId, jid }, '[inbound] ignored reply to a WhatsApp Status');
+    return; // replies to a Status are not support requests; the AI must not answer them
+  }
   const text = extractText(msg);
   const mediaType = detectMediaType(msg);
 
