@@ -4,6 +4,7 @@ import { prisma } from '../../prisma.js';
 import { requireAuth, requireRole } from '../../auth/middleware.js';
 import { hashPassword } from '../../auth/password.js';
 import { connectTenant, disconnectTenant } from '../../services/whatsapp/connect.js';
+import { getSession } from '../../services/whatsapp/manager.js';
 
 export const adminTenantsRouter = Router();
 
@@ -18,7 +19,21 @@ adminTenantsRouter.get('/', async (_req, res) => {
       _count: { select: { conversations: true, knowledgeFiles: true } },
     },
   });
-  res.json(tenants);
+  // The DB status can be stale (an old instance overlapping a deploy writes `disconnected` late);
+  // the live socket in this process is the truth, same as the per-tenant /status endpoint.
+  res.json(
+    tenants.map((t) => {
+      const live = getSession(t.id);
+      if (!t.whatsappSession || !live) return t;
+      return {
+        ...t,
+        whatsappSession: {
+          ...t.whatsappSession,
+          status: live.status === 'closed' ? 'disconnected' : live.status,
+        },
+      };
+    }),
+  );
 });
 
 const timezoneSchema = z.string().refine(
