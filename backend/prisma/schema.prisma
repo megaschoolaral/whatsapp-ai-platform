@@ -69,6 +69,7 @@ model Tenant {
   modelChoices       TenantModelChoices?
   followupSettings   TenantFollowupSettings?
   whatsappSession    WhatsappSession?
+  savedContacts      SavedContact[]
   conversations      Conversation[]
   knowledgeFiles     KnowledgeFile[]
   apiKeyAuditLogs    ApiKeyAuditLog[]
@@ -134,6 +135,17 @@ model WhatsappSession {
   hourlySendCount       Int       @default(0)
   hourWindowStartedAt   DateTime?
   updatedAt             DateTime  @updatedAt
+}
+
+/// Contacts the tenant has saved in their phone's address book; the AI stays silent for these chats.
+model SavedContact {
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  jid       String   // @s.whatsapp.net or @lid, as Baileys reports it
+  name      String
+  updatedAt DateTime @updatedAt
+
+  @@id([tenantId, jid])
 }
 
 model KnowledgeFile {

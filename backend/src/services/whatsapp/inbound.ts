@@ -11,6 +11,7 @@ import { loadTenantContext } from '../tenantContext.js';
 import { emitToTenant } from '../realtime/socketRooms.js';
 import { setStatus } from '../conversations/stateMachine.js';
 import { cancelFollowups } from '../followup/scheduler.js';
+import { isSavedContact } from './savedContacts.js';
 
 type Sock = ReturnType<typeof makeWASocket>;
 
@@ -168,8 +169,12 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
     mediaType,
   });
 
+  // Contacts saved in the owner's phone (friends, family) stay in the inbox but the AI never answers them.
+  const saved = await isSavedContact(tenantId, [jid, msg.key.remoteJidAlt]);
+  if (saved) logger.info({ tenantId, jid }, '[inbound] saved phone contact — AI skipped');
+
   // If conversation is in human_active or awaiting_human, do NOT buffer for AI.
-  if (conversation.status === 'human_active' || conversation.status === 'awaiting_human') {
+  if (saved || conversation.status === 'human_active' || conversation.status === 'awaiting_human') {
     await prisma.conversation.update({
       where: { id: conversation.id },
       data: { unreadCount: { increment: 1 }, lastMessageAt: new Date() },

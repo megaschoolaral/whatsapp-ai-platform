@@ -11,6 +11,7 @@ import { setSession, updateSession, getSession, removeSession } from './manager.
 import { emitToTenant } from '../realtime/socketRooms.js';
 import { handleIncomingMessage, handleOutgoingFromPhone } from './inbound.js';
 import { handlePresenceUpdate } from './presence.js';
+import { upsertSavedContacts } from './savedContacts.js';
 
 const connecting = new Set<string>();
 
@@ -166,6 +167,14 @@ async function connectTenantInner(tenantId: string): Promise<void> {
       }
     }
   });
+
+  const onContacts = (contacts: Partial<import('baileys').Contact>[]) => {
+    upsertSavedContacts(tenantId, contacts).catch((err) =>
+      logger.error({ err, tenantId }, '[whatsapp] failed to save contacts'),
+    );
+  };
+  sock.ev.on('contacts.upsert', onContacts);
+  sock.ev.on('contacts.update', onContacts);
 
   sock.ev.on('presence.update', ({ id, presences }) => {
     handlePresenceUpdate(tenantId, id, presences).catch((err) =>
