@@ -12,6 +12,8 @@ import { emitToTenant } from '../realtime/socketRooms.js';
 import { setStatus } from '../conversations/stateMachine.js';
 import { cancelFollowups } from '../followup/scheduler.js';
 import { isSavedContact } from './savedContacts.js';
+import { loadActiveReceiptSettings } from '../receipts/settings.js';
+import { handleReceiptMessage } from '../receipts/processor.js';
 
 type Sock = ReturnType<typeof makeWASocket>;
 
@@ -117,8 +119,11 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
   let transcribedText: string | null = null;
   let mediaDescriptor: { type: string; size: number } | null = null;
 
+  let mediaBuf: Buffer | null = null;
+
   if (mediaType) {
     const buf = await downloadMedia(msg);
+    mediaBuf = buf;
     if (buf) {
       mediaDescriptor = { type: mediaType, size: buf.byteLength };
       if (mediaType === 'image') {
@@ -172,6 +177,41 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
   // Contacts saved in the owner's phone (friends, family) stay in the inbox but the AI never answers them.
   const saved = await isSavedContact(tenantId, [jid, msg.key.remoteJidAlt]);
   if (saved) logger.info({ tenantId, jid }, '[inbound] saved phone contact — AI skipped');
+
+  // Kaspi receipt (QR in a photo or PDF): notify the owner's Telegram and hand the chat to a human instead of the AI.
+  const receiptMime =
+    mediaType === 'image'
+      ? (msg.message?.imageMessage?.mimetype ?? 'image/jpeg')
+      : mediaType === 'document' && msg.message?.documentMessage?.mimetype === 'application/pdf'
+        ? 'application/pdf'
+        : null;
+  if (!saved && mediaBuf && receiptMime) {
+    try {
+      const receiptSettings = await loadActiveReceiptSettings(tenantId);
+      if (receiptSettings) {
+        const result = await handleReceiptMessage({
+          tenantId,
+          sock,
+          jid,
+          jidAlt: msg.key.remoteJidAlt,
+          conversationId: conversation.id,
+          contactName: conversation.contactName,
+          buf: mediaBuf,
+          mimeType: receiptMime,
+          settings: receiptSettings,
+        });
+        if (result === 'handled') {
+          await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { unreadCount: { increment: 1 }, lastMessageAt: new Date() },
+          });
+          return;
+        }
+      }
+    } catch (err) {
+      logger.error({ err, tenantId }, '[inbound] receipt check failed — continuing as a normal message');
+    }
+  }
 
   // If conversation is in human_active or awaiting_human, do NOT buffer for AI.
   if (saved || conversation.status === 'human_active' || conversation.status === 'awaiting_human') {
