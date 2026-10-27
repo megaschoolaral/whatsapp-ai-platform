@@ -27,6 +27,7 @@ import { adminTenantPersonaRouter } from './routes/admin/tenantPersona.js';
 import { adminTenantWhatsappRouter } from './routes/admin/tenantWhatsapp.js';
 import { adminTenantKnowledgeRouter } from './routes/admin/tenantKnowledge.js';
 import { adminTenantFollowupsRouter } from './routes/admin/tenantFollowups.js';
+import { adminTenantReceiptCheckRouter } from './routes/admin/tenantReceiptCheck.js';
 import { adminUsageRouter } from './routes/admin/usage.js';
 import { tenantInboxRouter } from './routes/tenant/inbox.js';
 import { tenantSettingsRouter } from './routes/tenant/settings.js';
@@ -52,6 +53,7 @@ function buildApp(): Express {
   app.use('/api/admin/tenants/:tenantId/whatsapp', adminTenantWhatsappRouter);
   app.use('/api/admin/tenants/:tenantId/knowledge', adminTenantKnowledgeRouter);
   app.use('/api/admin/tenants/:tenantId/followups', adminTenantFollowupsRouter);
+  app.use('/api/admin/tenants/:tenantId/receipt-check', adminTenantReceiptCheckRouter);
   app.use('/api/admin/usage', adminUsageRouter);
 
   app.use('/api/tenant', tenantInboxRouter);
