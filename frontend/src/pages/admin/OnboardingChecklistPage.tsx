@@ -12,6 +12,7 @@ import { StepPersona } from './steps/StepPersona';
 import { StepWhatsapp } from './steps/StepWhatsapp';
 import { StepKnowledge } from './steps/StepKnowledge';
 import { StepFollowups } from './steps/StepFollowups';
+import { StepReceiptCheck } from './steps/StepReceiptCheck';
 
 interface OnboardingState {
   status: 'pending_setup' | 'active' | 'suspended';
@@ -193,6 +194,20 @@ export function OnboardingChecklistPage() {
           </CardHeader>
           <CardContent>
             <StepFollowups tenantId={tenantId} />
+          </CardContent>
+        </Card>
+      )}
+
+      {tenantId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Чек тексеру (Kaspi)</CardTitle>
+            <CardDescription>
+              Клиент WhatsApp-қа Kaspi чегін жіберсе, жүйе оны оқып, Telegram арнасына хабарлайды.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <StepReceiptCheck tenantId={tenantId} />
           </CardContent>
         </Card>
       )}
