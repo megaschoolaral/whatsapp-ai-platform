@@ -35,4 +35,12 @@ describe('sendTelegramMessage', () => {
     const err = await sendTelegramMessage(args).catch((e: Error) => e);
     expect((err as Error).message).not.toContain(TOKEN);
   });
+
+  it('reports the underlying network cause of a failed fetch', async () => {
+    const cause = Object.assign(new Error(`getaddrinfo ENOTFOUND api.telegram.org ${TOKEN}`), { code: 'ENOTFOUND' });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed', { cause })));
+    const err = (await sendTelegramMessage(args).catch((e: Error) => e)) as Error;
+    expect(err.message).toContain('ENOTFOUND');
+    expect(err.message).not.toContain(TOKEN);
+  });
 });

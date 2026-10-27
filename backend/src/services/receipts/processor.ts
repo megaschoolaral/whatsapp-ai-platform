@@ -112,6 +112,10 @@ async function process(a: ReceiptMessage): Promise<'handled' | 'not_receipt'> {
     } catch (err) {
       // The conversation still moves to awaiting_human below, so the owner sees it in the inbox.
       logger.error({ err, tenantId: a.tenantId, receiptId: receipt.receiptId }, '[receipts] Telegram notification failed');
+      // Release the receipt so a resend is not mistaken for a duplicate and can notify again.
+      await prisma.receipt
+        .delete({ where: { tenantId_receiptId: { tenantId: a.tenantId, receiptId: receipt.receiptId } } })
+        .catch((e) => logger.error({ err: e, tenantId: a.tenantId }, '[receipts] failed to release receipt'));
     }
   } else {
     logger.info({ tenantId: a.tenantId, receiptId: receipt.receiptId }, '[receipts] duplicate receipt');

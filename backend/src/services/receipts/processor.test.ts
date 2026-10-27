@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   appendMessage: vi.fn(),
   emitToTenant: vi.fn(),
   receiptCreate: vi.fn(),
+  receiptDelete: vi.fn(),
 }));
 
 vi.mock('./qr.js', () => ({ readQrUrl: mocks.readQrUrl }));
@@ -21,7 +22,7 @@ vi.mock('../whatsapp/outbound.js', () => ({ sendHumanLikeText: mocks.sendHumanLi
 vi.mock('../conversations/stateMachine.js', () => ({ setStatus: mocks.setStatus }));
 vi.mock('../conversations/store.js', () => ({ appendMessage: mocks.appendMessage }));
 vi.mock('../realtime/socketRooms.js', () => ({ emitToTenant: mocks.emitToTenant }));
-vi.mock('../../prisma.js', () => ({ prisma: { receipt: { create: mocks.receiptCreate } } }));
+vi.mock('../../prisma.js', () => ({ prisma: { receipt: { create: mocks.receiptCreate, delete: mocks.receiptDelete } } }));
 vi.mock('../../logger.js', () => ({ logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }));
 
 import { handleReceiptMessage } from './processor.js';
@@ -55,6 +56,7 @@ beforeEach(() => {
   mocks.readQrUrl.mockResolvedValue('https://pay.kaspi.kz/r/1');
   mocks.fetchKaspiReceipt.mockResolvedValue(receipt);
   mocks.receiptCreate.mockResolvedValue({});
+  mocks.receiptDelete.mockResolvedValue({});
   mocks.sendHumanLikeText.mockResolvedValue({ sent: true });
   mocks.sendTelegramMessage.mockResolvedValue(undefined);
   mocks.setStatus.mockResolvedValue(undefined);
@@ -114,9 +116,10 @@ describe('handleReceiptMessage', () => {
     expect(mocks.setStatus).not.toHaveBeenCalled();
   });
 
-  it('still answers the client and hands over when Telegram fails', async () => {
+  it('still answers the client and hands over when Telegram fails, and releases the receipt for a resend', async () => {
     mocks.sendTelegramMessage.mockRejectedValue(new Error('telegram down'));
     expect(await run()).toBe('handled');
+    expect(mocks.receiptDelete).toHaveBeenCalledWith({ where: { tenantId_receiptId: { tenantId: 't1', receiptId: 'QR1' } } });
     expect(mocks.sendHumanLikeText).toHaveBeenCalledOnce();
     expect(mocks.setStatus).toHaveBeenCalledWith('c1', 'awaiting_human', { handoffReason: 'receipt' });
   });

@@ -12,7 +12,9 @@ export async function sendTelegramMessage(a: { botToken: string; chatId: string;
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (err) {
-    throw new Error(`Telegram request failed: ${redact(err instanceof Error ? err.message : String(err))}`);
+    const cause = err instanceof Error ? (err.cause as { code?: string; message?: string } | undefined) : undefined;
+    const detail = cause ? ` (${[cause.code, cause.message].filter(Boolean).join(': ')})` : '';
+    throw new Error(`Telegram request failed: ${redact((err instanceof Error ? err.message : String(err)) + detail)}`);
   }
   const body = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
   if (!res.ok || body.ok === false) {
