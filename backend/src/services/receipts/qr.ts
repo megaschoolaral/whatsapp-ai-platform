@@ -1,34 +1,38 @@
-import jsQRModule from 'jsqr';
+import { fork } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
-import { PNG } from 'pngjs';
 import { logger } from '../../logger.js';
+import { decodeRgba } from './qrDecode.js';
 
-// Under NodeNext the CJS default import is typed as the module namespace, but at runtime it is the function.
-const jsQR = jsQRModule as unknown as typeof jsQRModule.default;
-
-// At a smaller scale jsQR fails on real Kaspi PDFs.
-const PDF_RENDER_SCALE = 3;
-
-function decode(rgba: Uint8Array | Buffer, width: number, height: number): string | null {
-  const code = jsQR(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.byteLength), width, height);
-  return code?.data ?? null;
-}
+const PDF_WORKER_TIMEOUT_MS = 30_000;
 
 async function readFromImage(buf: Buffer): Promise<string | null> {
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  return decode(data, info.width, info.height);
+  return decodeRgba(data, info.width, info.height);
 }
 
-async function readFromPdf(buf: Buffer): Promise<string | null> {
-  // pdf-to-img is ESM-only and heavy; load it only when a PDF actually arrives.
-  const { pdf } = await import('pdf-to-img');
-  const doc = await pdf(buf, { scale: PDF_RENDER_SCALE });
-  for await (const page of doc) {
-    const png = PNG.sync.read(page);
-    const url = decode(png.data, png.width, png.height);
-    if (url) return url;
-  }
-  return null;
+/** PDFs are rendered in a throw-away child process so the heavy renderer's memory is freed afterwards. */
+function readFromPdf(buf: Buffer): Promise<string | null> {
+  return new Promise((resolve) => {
+    const isTs = import.meta.url.endsWith('.ts'); // dev/tests run the sources through tsx, production runs dist/*.js
+    const worker = fork(fileURLToPath(new URL(isTs ? './pdfQrWorker.ts' : './pdfQrWorker.js', import.meta.url)), [], {
+      execArgv: isTs ? ['--import', 'tsx'] : [],
+      serialization: 'advanced',
+    });
+    let settled = false;
+    const finish = (url: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      worker.kill();
+      resolve(url);
+    };
+    const timer = setTimeout(() => finish(null), PDF_WORKER_TIMEOUT_MS);
+    worker.once('message', (msg: { url: string | null }) => finish(msg.url));
+    worker.once('error', () => finish(null));
+    worker.once('exit', () => finish(null));
+    worker.send({ pdf: buf });
+  });
 }
 
 /** QR text from a photo or PDF, or `null` when there is none (or the file is unreadable). */
