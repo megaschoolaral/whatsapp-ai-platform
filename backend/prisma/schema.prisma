@@ -70,6 +70,8 @@ model Tenant {
   followupSettings   TenantFollowupSettings?
   whatsappSession    WhatsappSession?
   savedContacts      SavedContact[]
+  receiptSettings    TenantReceiptSettings?
+  receipts           Receipt[]
   conversations      Conversation[]
   knowledgeFiles     KnowledgeFile[]
   apiKeyAuditLogs    ApiKeyAuditLog[]
@@ -146,6 +148,33 @@ model SavedContact {
   updatedAt DateTime @updatedAt
 
   @@id([tenantId, jid])
+}
+
+/// Per-tenant Kaspi receipt check: reads the QR of a receipt a customer sends and notifies the owner's Telegram channel.
+model TenantReceiptSettings {
+  tenantId             String   @id
+  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enabled              Boolean  @default(false)
+  sellerIin            String?
+  minAmount            Int?
+  telegramBotTokenEnc  String?  // AES-GCM encrypted
+  telegramChatId       String?
+  updatedAt            DateTime @updatedAt
+}
+
+model Receipt {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receiptId       String   // Kaspi extTranId; unique per tenant so a receipt is never counted twice
+  amount          Int
+  sellerIin       String
+  paymentMethod   String?
+  qrUrl           String
+  conversationId  String?
+  createdAt       DateTime @default(now())
+
+  @@unique([tenantId, receiptId])
 }
 
 model KnowledgeFile {
