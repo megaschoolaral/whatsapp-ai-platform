@@ -15,6 +15,15 @@ type KeyStore = Record<string, Record<string, unknown>>;
 const KEYS_FLUSH_MS = 30_000;
 const flushers = new Map<string, () => Promise<void>>();
 
+const keyCounters = new Map<string, () => number>();
+
+/** Number of cached auth keys per tenant (diagnostics only). */
+export function getAuthKeyCounts(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [tenantId, count] of keyCounters) out[tenantId] = count();
+  return out;
+}
+
 /** Persist any pending (debounced) auth keys for one tenant. */
 export async function flushAuthKeys(tenantId: string): Promise<void> {
   await flushers.get(tenantId)?.();
@@ -102,6 +111,7 @@ export async function makeDbAuthState(tenantId: string): Promise<{
   };
 
   flushers.set(tenantId, flushKeys);
+  keyCounters.set(tenantId, () => Object.values(keysData).reduce((n, bucket) => n + Object.keys(bucket).length, 0));
 
   const saveCreds = async () => {
     await prisma.whatsappSession.update({

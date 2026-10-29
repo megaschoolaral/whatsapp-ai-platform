@@ -16,6 +16,7 @@ import { setIo } from './services/realtime/socketRooms.js';
 import { connectTenant } from './services/whatsapp/connect.js';
 import { closeAllSessions } from './services/whatsapp/manager.js';
 import { flushAllAuthKeys } from './services/whatsapp/sessionStore.js';
+import { startMemoryMonitor } from './services/diagnostics/memoryMonitor.js';
 import { verifyToken } from './auth/jwt.js';
 
 import { healthRouter } from './routes/health.js';
@@ -127,6 +128,7 @@ async function main() {
   server.listen(env.PORT, () => {
     logger.info({ port: env.PORT, env: env.NODE_ENV }, '[server] listening');
   });
+  startMemoryMonitor();
 
   const shutdown = async () => {
     logger.info('[server] shutting down');
