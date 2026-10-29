@@ -48,6 +48,7 @@ function serialize(value: unknown): string {
 export async function makeDbAuthState(tenantId: string): Promise<{
   state: AuthenticationState;
   saveCreds: () => Promise<void>;
+  release: () => Promise<void>;
 }> {
   // Unsaved keys from a previous socket must hit the DB before we read it back.
   await flushAuthKeys(tenantId).catch(() => undefined);
@@ -110,8 +111,20 @@ export async function makeDbAuthState(tenantId: string): Promise<{
     }
   };
 
+  const countKeys = () => Object.values(keysData).reduce((n, bucket) => n + Object.keys(bucket).length, 0);
   flushers.set(tenantId, flushKeys);
-  keyCounters.set(tenantId, () => Object.values(keysData).reduce((n, bucket) => n + Object.keys(bucket).length, 0));
+  keyCounters.set(tenantId, countKeys);
+
+  // Persist pending keys and stop holding this tenant's key cache once its socket is gone.
+  // A newer state for the same tenant (reconnect) owns the map entries, so it is left alone.
+  const release = async () => {
+    try {
+      await flushKeys();
+    } finally {
+      if (flushers.get(tenantId) === flushKeys) flushers.delete(tenantId);
+      if (keyCounters.get(tenantId) === countKeys) keyCounters.delete(tenantId);
+    }
+  };
 
   const saveCreds = async () => {
     await prisma.whatsappSession.update({
@@ -156,5 +169,5 @@ export async function makeDbAuthState(tenantId: string): Promise<{
     },
   };
 
-  return { state, saveCreds };
+  return { state, saveCreds, release };
 }

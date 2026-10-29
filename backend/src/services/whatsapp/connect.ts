@@ -40,7 +40,7 @@ async function connectTenantInner(tenantId: string): Promise<void> {
     return;
   }
 
-  const { state, saveCreds } = await makeDbAuthState(tenantId);
+  const { state, saveCreds, release } = await makeDbAuthState(tenantId);
   const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined as unknown as [number, number, number] }));
 
   const sock = makeWASocket({
@@ -108,7 +108,7 @@ async function connectTenantInner(tenantId: string): Promise<void> {
     if (connection === 'close') {
       const reason = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
       logger.warn({ tenantId, reason }, '[whatsapp] connection closed');
-      await flushAuthKeys(tenantId).catch((err) => logger.error({ err, tenantId }, '[whatsapp] auth key flush failed'));
+      await release().catch((err) => logger.error({ err, tenantId }, '[whatsapp] auth key flush failed'));
       await prisma.whatsappSession.update({
         where: { tenantId },
         data: { status: 'disconnected', lastDisconnectReason: String(reason ?? 'unknown') },
