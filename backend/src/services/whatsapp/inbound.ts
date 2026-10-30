@@ -35,14 +35,22 @@ function isReplyToStatus(msg: WAMessage): boolean {
   );
 }
 
+/** Text of a message, also when it is wrapped (disappearing/view-once) or comes from a button/list/ad entry point. */
 function extractText(msg: WAMessage): string {
-  const m = msg.message;
+  const m = normalizeMessageContent(msg.message);
   if (!m) return '';
   return (
-    m.conversation ??
-    m.extendedTextMessage?.text ??
-    m.imageMessage?.caption ??
-    m.videoMessage?.caption ??
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    m.documentMessage?.caption ||
+    m.buttonsResponseMessage?.selectedDisplayText ||
+    m.templateButtonReplyMessage?.selectedDisplayText ||
+    m.listResponseMessage?.title ||
+    m.buttonsMessage?.contentText ||
+    m.templateMessage?.hydratedTemplate?.hydratedContentText ||
+    m.interactiveMessage?.body?.text ||
     ''
   );
 }
@@ -85,6 +93,13 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
   }
   const text = extractText(msg);
   const mediaType = detectMediaType(msg);
+  if (!text && !mediaType) {
+    const content = normalizeMessageContent(msg.message);
+    logger.warn(
+      { tenantId, jid, messageKeys: Object.keys(msg.message ?? {}), contentKeys: Object.keys(content ?? {}) },
+      '[inbound] message without readable text or media',
+    );
+  }
 
   // Subscribe to presence so we can react to composing/paused
   try {
