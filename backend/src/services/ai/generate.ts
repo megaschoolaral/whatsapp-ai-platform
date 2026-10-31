@@ -3,6 +3,9 @@ import { resolveTextModel, resolveVisionModel } from './providers.js';
 import { logTextUsage, logVisionUsage } from './usageLog.js';
 import { queryCorpus } from './rag.js';
 import type { TenantContext } from '../tenantContext.js';
+import { buildPhotoTool, photoPromptSection } from '../photos/tool.js';
+import { listPhotoSummary } from '../photos/store.js';
+import type { PhotoCategoryId } from '../photos/categories.js';
 
 export interface ChatTurn {
   role: 'user' | 'assistant';
@@ -23,6 +26,8 @@ export interface GenerateReplyResult {
   inputTokens: number;
   outputTokens: number;
   ragUsed: boolean;
+  /** Photo categories the AI asked to send after the text reply. */
+  photoCategories: PhotoCategoryId[];
 }
 
 function systemMessage(tenant: TenantContext, ragContext: string, isFirstMessage: boolean): string {
@@ -82,20 +87,64 @@ async function describeImage(
   return result.text;
 }
 
+const FALLBACK_PHOTO_TEXT = 'Фото отправляю.';
+
 export async function generateReply(args: GenerateReplyArgs): Promise<GenerateReplyResult> {
   const { tenant, history, userMessage, imageBase64, imageMimeType, conversationId } = args;
 
   // 1. RAG
   const ragContext = await queryCorpus(tenant, userMessage, conversationId);
 
+  const textModel = resolveTextModel(tenant);
+
+  // Photo tool: only when the tenant uploaded photos and the model can call tools.
+  let photo: ReturnType<typeof buildPhotoTool> | null = null;
+  let photoPrompt = '';
+  if (conversationId && textModel.meta.supportsTools) {
+    const categories = (await listPhotoSummary(tenant.id))
+      .map((c) => ({ id: c.id, label: c.label, count: c.photos.length }))
+      .filter((c) => c.count > 0);
+    if (categories.length) {
+      photo = buildPhotoTool({ tenantId: tenant.id, conversationId });
+      photoPrompt = photoPromptSection(categories);
+    }
+  }
+  const system = () => systemMessage(tenant, ragContext, history.length === 0) + photoPrompt;
+
+  const run = async (messages: CoreMessage[]) => {
+    const result = await generateText({
+      model: textModel.sdkModel,
+      messages,
+      ...(photo ? { tools: { send_photos: photo.tool }, maxSteps: 3 } : {}),
+    });
+    const inputTokens = result.usage?.promptTokens ?? 0;
+    const outputTokens = result.usage?.completionTokens ?? 0;
+    await logTextUsage({
+      tenantId: tenant.id,
+      provider: textModel.meta.provider,
+      modelId: tenant.textModelId,
+      inputTokens,
+      outputTokens,
+      conversationId,
+    });
+    const queued = photo ? [...photo.queued] : [];
+    const raw = stripRepeatedGreeting(result.text, history.length === 0);
+    return {
+      text: raw.trim() || (queued.length ? FALLBACK_PHOTO_TEXT : raw),
+      inputTokens,
+      outputTokens,
+      ragUsed: !!ragContext,
+      photoCategories: queued,
+    };
+  };
+
   // 2. Vision fallback (if image and text model can't handle vision natively)
   let augmentedUserMessage = userMessage;
-  const textModel = resolveTextModel(tenant);
   if (imageBase64 && imageMimeType) {
     if (textModel.meta.supportsVision) {
       // Send image directly to text model
-      const messages: CoreMessage[] = [
-        { role: 'system', content: systemMessage(tenant, ragContext, history.length === 0) },
+      return run([
+        { role: 'system', content: system() },
         ...history.map<CoreMessage>((h) => ({ role: h.role, content: h.content })),
         {
           role: 'user',
@@ -104,48 +153,16 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
             { type: 'image', image: imageBase64, mimeType: imageMimeType },
           ],
         },
-      ];
-      const result = await generateText({ model: textModel.sdkModel, messages });
-      await logTextUsage({
-        tenantId: tenant.id,
-        provider: textModel.meta.provider,
-        modelId: tenant.textModelId,
-        inputTokens: result.usage?.promptTokens ?? 0,
-        outputTokens: result.usage?.completionTokens ?? 0,
-        conversationId,
-      });
-      return {
-        text: stripRepeatedGreeting(result.text, history.length === 0),
-        inputTokens: result.usage?.promptTokens ?? 0,
-        outputTokens: result.usage?.completionTokens ?? 0,
-        ragUsed: !!ragContext,
-      };
+      ]);
     }
     // Fallback: describe via vision model and append
     const desc = await describeImage(tenant, imageBase64, imageMimeType, conversationId ?? null);
     augmentedUserMessage = `${userMessage}\n\n[Image description from vision model: ${desc}]`;
   }
 
-  const messages: CoreMessage[] = [
-    { role: 'system', content: systemMessage(tenant, ragContext, history.length === 0) },
+  return run([
+    { role: 'system', content: system() },
     ...history.map<CoreMessage>((h) => ({ role: h.role, content: h.content })),
     { role: 'user', content: augmentedUserMessage },
-  ];
-  const result = await generateText({ model: textModel.sdkModel, messages });
-
-  await logTextUsage({
-    tenantId: tenant.id,
-    provider: textModel.meta.provider,
-    modelId: tenant.textModelId,
-    inputTokens: result.usage?.promptTokens ?? 0,
-    outputTokens: result.usage?.completionTokens ?? 0,
-    conversationId,
-  });
-
-  return {
-    text: stripRepeatedGreeting(result.text, history.length === 0),
-    inputTokens: result.usage?.promptTokens ?? 0,
-    outputTokens: result.usage?.completionTokens ?? 0,
-    ragUsed: !!ragContext,
-  };
+  ]);
 }
