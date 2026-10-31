@@ -76,6 +76,10 @@ export async function getCategoryPhotos(
   return rows.map((r) => ({ id: r.id, data: Buffer.from(r.data), mimeType: r.mimeType }));
 }
 
+export async function countCategoryPhotos(tenantId: string, category: PhotoCategoryId): Promise<number> {
+  return prisma.propertyPhoto.count({ where: { tenantId, category } });
+}
+
 export async function tenantHasPhotos(tenantId: string): Promise<boolean> {
   return (await prisma.propertyPhoto.count({ where: { tenantId } })) > 0;
 }

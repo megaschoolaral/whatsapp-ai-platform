@@ -15,6 +15,8 @@ export interface TextOrVisionModel {
   avgCostPerMessage: number;
   contextWindow: number;
   supportsVision: boolean;
+  /** Can call AI-SDK tools (used by the photo-sending tool); false disables it for this model. */
+  supportsTools: boolean;
   isActive: boolean;
   notes: string;
 }
@@ -39,6 +41,7 @@ export const MODEL_PRICING = {
       avgCostPerMessage: 0.005,
       contextWindow: 1_000_000,
       supportsVision: true,
+      supportsTools: true,
       isActive: true,
       notes: 'Universal, надёжный, vision встроен',
     },
@@ -51,6 +54,7 @@ export const MODEL_PRICING = {
       avgCostPerMessage: 0.002,
       contextWindow: 1_000_000,
       supportsVision: true,
+      supportsTools: true,
       isActive: true,
       notes: 'Быстрый и дешёвый, vision встроен',
     },
@@ -63,6 +67,7 @@ export const MODEL_PRICING = {
       avgCostPerMessage: 0.0007,
       contextWindow: 2_000_000,
       supportsVision: false,
+      supportsTools: true,
       isActive: true,
       notes: 'Самый дешёвый, 2M context. Vision слабый — для фото использовать Vision Model.',
     },
@@ -78,6 +83,7 @@ export const MODEL_PRICING = {
       avgCostPerMessage: 0.005,
       contextWindow: 1_000_000,
       supportsVision: true,
+      supportsTools: true,
       isActive: true,
       notes: 'OpenAI vision',
     },
@@ -90,6 +96,7 @@ export const MODEL_PRICING = {
       avgCostPerMessage: 0.002,
       contextWindow: 1_000_000,
       supportsVision: true,
+      supportsTools: true,
       isActive: true,
       notes: 'Google vision',
     },

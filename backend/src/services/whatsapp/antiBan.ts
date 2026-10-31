@@ -70,3 +70,20 @@ export async function canSendAndIncrement(tenantId: string): Promise<{
 
   return { allowed: true, limits };
 }
+
+/** How many more messages may be sent right now (min of hourly and daily headroom). Does not change counters. */
+export async function getSendCapacity(tenantId: string): Promise<{ remaining: number }> {
+  const session = await prisma.whatsappSession.findUnique({ where: { tenantId } });
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+  if (!session || !tenant) return { remaining: 0 };
+
+  const start = tenant.warmupStartedAt ?? new Date();
+  const limits = warmupLimits(Math.floor((Date.now() - start.getTime()) / (1000 * 60 * 60 * 24)));
+
+  const now = Date.now();
+  const dayExpired = !session.dayWindowStartedAt || now - session.dayWindowStartedAt.getTime() > 24 * 60 * 60 * 1000;
+  const hourExpired = !session.hourWindowStartedAt || now - session.hourWindowStartedAt.getTime() > 60 * 60 * 1000;
+  const dailyLeft = limits.dailyHard - (dayExpired ? 0 : session.dailySendCount);
+  const hourlyLeft = limits.hourlyHard - (hourExpired ? 0 : session.hourlySendCount);
+  return { remaining: Math.max(0, Math.min(dailyLeft, hourlyLeft)) };
+}
