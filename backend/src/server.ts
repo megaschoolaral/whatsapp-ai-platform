@@ -32,6 +32,7 @@ import { adminTenantReceiptCheckRouter } from './routes/admin/tenantReceiptCheck
 import { adminUsageRouter } from './routes/admin/usage.js';
 import { tenantInboxRouter } from './routes/tenant/inbox.js';
 import { tenantSettingsRouter } from './routes/tenant/settings.js';
+import { tenantPhotosRouter } from './routes/tenant/photos.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,6 +60,7 @@ function buildApp(): Express {
 
   app.use('/api/tenant', tenantInboxRouter);
   app.use('/api/tenant', tenantSettingsRouter);
+  app.use('/api/tenant', tenantPhotosRouter);
 
   // Static frontend build (production)
   const frontendDist = path.resolve(__dirname, '../../frontend/dist');
