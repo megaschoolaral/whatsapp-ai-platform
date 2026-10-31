@@ -74,6 +74,7 @@ model Tenant {
   receipts           Receipt[]
   conversations      Conversation[]
   knowledgeFiles     KnowledgeFile[]
+  propertyPhotos     PropertyPhoto[]
   apiKeyAuditLogs    ApiKeyAuditLog[]
   aiUsageLogs        AiUsageLog[]
 }
@@ -213,6 +214,7 @@ model Conversation {
   createdAt                DateTime            @default(now())
 
   messages                 Message[]
+  photoSends               PhotoSend[]
 
   @@unique([tenantId, contactIdentifier])
   @@index([tenantId, status, lastMessageAt])
@@ -254,4 +256,30 @@ model AiUsageLog {
 
   @@index([tenantId, createdAt])
   @@index([tenantId, category, createdAt])
+}
+
+model PropertyPhoto {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category  String
+  mimeType  String
+  data      Bytes
+  sizeBytes Int
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, category, createdAt])
+}
+
+/// A photo category already sent in a conversation; the AI does not re-send it.
+model PhotoSend {
+  id             String       @id @default(uuid())
+  tenantId       String
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  category       String
+  sentAt         DateTime     @default(now())
+
+  @@unique([conversationId, category])
+  @@index([tenantId, category])
 }
