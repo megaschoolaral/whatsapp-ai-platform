@@ -8,6 +8,7 @@ import { CreateTenantPage } from '@/pages/admin/CreateTenantPage';
 import { OnboardingChecklistPage } from '@/pages/admin/OnboardingChecklistPage';
 import { UsageCrossTenantPage } from '@/pages/admin/UsageCrossTenantPage';
 import { InboxPage } from '@/pages/tenant/InboxPage';
+import { PhotosPage } from '@/pages/tenant/PhotosPage';
 import {
   PersonaPage,
   FollowupsPage,
@@ -37,6 +38,7 @@ const tenantLinks = [
   { to: '/app/models', label: 'Модели' },
   { to: '/app/keys', label: 'API ключи' },
   { to: '/app/knowledge', label: 'KB' },
+  { to: '/app/photos', label: 'Фото' },
   { to: '/app/usage', label: 'Расходы' },
   { to: '/app/channel', label: 'WhatsApp' },
 ];
@@ -65,6 +67,7 @@ export default function App() {
           <Route path="/app/models" element={<ModelsPage />} />
           <Route path="/app/keys" element={<KeysPage />} />
           <Route path="/app/knowledge" element={<KnowledgePage />} />
+          <Route path="/app/photos" element={<PhotosPage />} />
           <Route path="/app/usage" element={<UsagePage />} />
           <Route path="/app/channel" element={<ChannelStatusPage />} />
         </Route>

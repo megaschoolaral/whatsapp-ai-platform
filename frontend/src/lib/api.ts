@@ -53,3 +53,15 @@ export async function apiRequest<T = unknown>(path: string, opts: RequestOptions
   }
   return parsed as T;
 }
+
+/** Authenticated binary GET (e.g. images), since <img src> cannot send the Authorization header. */
+export async function fetchBlob(path: string): Promise<Blob> {
+  const token = useAuthStore.getState().token;
+  const res = await fetch(BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    window.location.href = '/login';
+  }
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`, null);
+  return res.blob();
+}
