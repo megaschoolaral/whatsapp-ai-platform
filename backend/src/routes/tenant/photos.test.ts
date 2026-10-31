@@ -16,7 +16,8 @@ vi.mock('../../prisma.js', () => ({ prisma: {} }));
 vi.mock('../../auth/middleware.js', () => ({ requireAuth: vi.fn(), tenantIsolation: vi.fn() }));
 
 import { InvalidImageError, PhotoLimitError } from '../../services/photos/store.js';
-import { deletePhotoHandler, photoImageHandler, uploadPhotoHandler } from './photos.js';
+import multer from 'multer';
+import { deletePhotoHandler, photoImageHandler, photoUploadErrorHandler, uploadPhotoHandler } from './photos.js';
 
 function res() {
   const r = {
@@ -104,5 +105,24 @@ describe('photoImageHandler', () => {
     await photoImageHandler(req({ params: { id: 'p1' } }), r);
     expect(r.setHeader).toHaveBeenCalledWith('Content-Type', 'image/jpeg');
     expect(r.send).toHaveBeenCalledWith(Buffer.from('img'));
+  });
+});
+
+describe('photoUploadErrorHandler', () => {
+  it('answers 413 with a clear message when the file is larger than 10 MB', () => {
+    const r = res();
+    const next = vi.fn();
+    photoUploadErrorHandler(new multer.MulterError('LIMIT_FILE_SIZE'), req({}), r, next);
+    expect(r.status).toHaveBeenCalledWith(413);
+    expect(r.json.mock.calls[0][0].error).toContain('10 МБ');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('passes every other error on', () => {
+    const r = res();
+    const next = vi.fn();
+    const err = new Error('boom');
+    photoUploadErrorHandler(err, req({}), r, next);
+    expect(next).toHaveBeenCalledWith(err);
   });
 });

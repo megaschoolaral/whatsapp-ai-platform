@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
 import { requireAuth, tenantIsolation } from '../../auth/middleware.js';
 import { isPhotoCategory } from '../../services/photos/categories.js';
@@ -14,7 +14,8 @@ import {
 export const tenantPhotosRouter = Router();
 tenantPhotosRouter.use(requireAuth, tenantIsolation);
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FILE_BYTES } });
 
 export async function listPhotosHandler(req: Request, res: Response): Promise<void> {
   res.json({ categories: await listPhotoSummary(req.tenantScope!) });
@@ -65,7 +66,17 @@ export async function photoImageHandler(req: Request, res: Response): Promise<vo
   res.send(photo.data);
 }
 
+/** Turns multer's size-limit error into a clear 413 instead of a generic 500. */
+export function photoUploadErrorHandler(err: unknown, _req: Request, res: Response, next: NextFunction): void {
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+    res.status(413).json({ error: 'Файл больше 10 МБ — не загружен. Уменьшите фото и попробуйте снова.' });
+    return;
+  }
+  next(err);
+}
+
 tenantPhotosRouter.get('/photos', listPhotosHandler);
 tenantPhotosRouter.post('/photos/:category', upload.single('file'), uploadPhotoHandler);
 tenantPhotosRouter.delete('/photos/:id', deletePhotoHandler);
 tenantPhotosRouter.get('/photos/:id/image', photoImageHandler);
+tenantPhotosRouter.use(photoUploadErrorHandler);

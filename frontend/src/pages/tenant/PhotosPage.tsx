@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
 const MAX_PER_CATEGORY = 10;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 interface PhotoCategory {
   id: string;
@@ -45,6 +46,10 @@ function CategoryBlock({ category, onChange }: { category: PhotoCategory; onChan
     setBusy(true);
     try {
       for (const f of Array.from(files)) {
+        if (f.size > MAX_FILE_BYTES) {
+          toast.error(`«${f.name}» больше 10 МБ — не загружен. Уменьшите фото и попробуйте снова.`);
+          continue;
+        }
         const fd = new FormData();
         fd.append('file', f);
         try {
@@ -129,7 +134,7 @@ export function PhotosPage() {
     <div className="space-y-4">
       <p className="text-sm text-slate-500">
         Фото, которые бот отправит клиенту, когда он попросит показать кухню, ванную, зону отдыха или номер. До {MAX_PER_CATEGORY} фото
-        в каждой категории.
+        в каждой категории, размер одного файла — не больше 10 МБ.
       </p>
       {categories.map((c) => (
         <CategoryBlock key={c.id} category={c} onChange={refresh} />
