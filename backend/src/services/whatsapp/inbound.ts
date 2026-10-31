@@ -27,15 +27,29 @@ function isDirectChatJid(jid: string | null | undefined): jid is string {
 function isReplyToStatus(msg: WAMessage): boolean {
   const content = normalizeMessageContent(msg.message);
   if (!content) return false;
-  return Object.values(content).some(
-    (part) =>
-      typeof part === 'object' &&
-      part !== null &&
-      (part as { contextInfo?: { remoteJid?: string | null } }).contextInfo?.remoteJid === 'status@broadcast',
-  );
+  type Ctx = { remoteJid?: string | null; externalAdReply?: unknown; entryPointConversionSource?: string | null };
+  return Object.values(content).some((part) => {
+    if (typeof part !== 'object' || part === null) return false;
+    const ctx = (part as { contextInfo?: Ctx }).contextInfo;
+    if (ctx?.remoteJid !== 'status@broadcast') return false;
+    // A click-to-WhatsApp ad shown in Status is a real lead, not a reply to someone's Status.
+    return !(ctx.externalAdReply || ctx.entryPointConversionSource);
+  });
 }
 
 /** Text of a message, also when it is wrapped (disappearing/view-once) or comes from a button/list/ad entry point. */
+/**
+ * No real content yet: an empty placeholder (Meta ad messages arrive empty until WhatsApp re-sends the real one,
+ * the same message id) or a protocol/system message. Storing it would make the real message look like a duplicate.
+ */
+function hasNoContent(msg: WAMessage): boolean {
+  const content = normalizeMessageContent(msg.message);
+  if (!content) return true;
+  return Object.keys(content).every(
+    (k) => k === 'protocolMessage' || k === 'senderKeyDistributionMessage' || k === 'messageContextInfo',
+  );
+}
+
 function extractText(msg: WAMessage): string {
   const m = normalizeMessageContent(msg.message);
   if (!m) return '';
@@ -90,6 +104,13 @@ export async function handleIncomingMessage(tenantId: string, sock: Sock, msg: W
   if (isReplyToStatus(msg)) {
     logger.info({ tenantId, jid }, '[inbound] ignored reply to a WhatsApp Status');
     return; // replies to a Status are not support requests; the AI must not answer them
+  }
+  if (hasNoContent(msg)) {
+    logger.info(
+      { tenantId, jid, msgId: msg.key.id, stubType: msg.messageStubType, keys: Object.keys(msg.message ?? {}) },
+      '[inbound] skipped message without content (placeholder or protocol message)',
+    );
+    return;
   }
   const text = extractText(msg);
   const mediaType = detectMediaType(msg);
