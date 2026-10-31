@@ -1,6 +1,5 @@
 import sharp from 'sharp';
 import { prisma } from '../../prisma.js';
-import { compressImage } from '../whatsapp/media.js';
 import { MAX_PHOTOS_PER_CATEGORY, PHOTO_CATEGORIES, type PhotoCategoryId } from './categories.js';
 
 export class PhotoLimitError extends Error {}
@@ -13,14 +12,18 @@ export async function addPhoto(
   mimeType: string,
 ): Promise<{ id: string }> {
   if (!mimeType.startsWith('image/')) throw new InvalidImageError('Not an image');
+  // Re-encode here (not compressImage, which falls back to the original bytes): a half-downloaded file must fail.
+  let compressed: { buffer: Buffer; mimeType: string };
   try {
-    await sharp(buf).metadata();
+    const buffer = await sharp(buf).resize({ width: 1024, withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+    compressed = { buffer, mimeType: 'image/jpeg' };
   } catch {
     throw new InvalidImageError('Cannot decode image');
   }
-  const compressed = await compressImage(buf, mimeType);
 
   return prisma.$transaction(async (tx) => {
+    // Serialise uploads into the same category so two requests cannot both take the last slot.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${tenantId}:${category}`}))`;
     const count = await tx.propertyPhoto.count({ where: { tenantId, category } });
     if (count >= MAX_PHOTOS_PER_CATEGORY) throw new PhotoLimitError(`Max ${MAX_PHOTOS_PER_CATEGORY} photos per category`);
     const created = await tx.propertyPhoto.create({

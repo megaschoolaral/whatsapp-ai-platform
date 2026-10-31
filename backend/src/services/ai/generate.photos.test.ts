@@ -46,6 +46,28 @@ beforeEach(() => {
 const args = { tenant, history: [], userMessage: 'есть фото?', conversationId: 'c1' };
 
 describe('generateReply photos', () => {
+  it('reports when a photo request was blocked by the send limits', async () => {
+    mocks.getSendCapacity.mockResolvedValue({ remaining: 1 });
+    mocks.generateText.mockImplementation(async (a: { tools: { send_photos: { execute: (x: unknown, o: unknown) => Promise<unknown> } } }) => {
+      await a.tools.send_photos.execute({ category: 'room_4' }, { toolCallId: '1', messages: [] });
+      return { text: 'Скоро отправим', usage };
+    });
+    const res = await generateReply(args);
+    expect(res.photoBlocked).toBe(true);
+    expect(res.photoCategories).toEqual([]);
+  });
+
+  it('de-duplicates and caps the queued categories', async () => {
+    mocks.generateText.mockImplementation(async (a: { tools: { send_photos: { execute: (x: unknown, o: unknown) => Promise<unknown> } } }) => {
+      await Promise.all(['room_4', 'room_4', 'kitchen', 'lounge'].map((category, i) =>
+        a.tools.send_photos.execute({ category }, { toolCallId: String(i), messages: [] })));
+      return { text: 'ok', usage };
+    });
+    const res = await generateReply(args);
+    expect(res.photoCategories.length).toBeLessThanOrEqual(2);
+    expect(new Set(res.photoCategories).size).toBe(res.photoCategories.length);
+  });
+
   it('passes no tools when the tenant has no photos', async () => {
     mocks.listPhotoSummary.mockResolvedValue([{ id: 'room_4', label: 'x', photos: [] }]);
     const res = await generateReply(args);

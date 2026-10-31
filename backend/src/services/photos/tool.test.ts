@@ -74,6 +74,38 @@ describe('buildPhotoTool', () => {
   });
 });
 
+describe('buildPhotoTool concurrency and capacity', () => {
+  it('never queues more than 2 categories when the model calls the tool in parallel', async () => {
+    const { tool: t, queued } = buildPhotoTool({ tenantId: 't1', conversationId: 'c1' });
+    const call = (category: string) => t.execute!({ category }, { toolCallId: category, messages: [] });
+    await Promise.all([call('kitchen'), call('bathroom'), call('lounge')]);
+    expect(queued).toHaveLength(2);
+  });
+
+  it('queues a category once when it is requested twice in parallel', async () => {
+    const { tool: t, queued } = buildPhotoTool({ tenantId: 't1', conversationId: 'c1' });
+    const call = (id: string) => t.execute!({ category: 'room_4' }, { toolCallId: id, messages: [] });
+    await Promise.all([call('a'), call('b')]);
+    expect(queued).toEqual(['room_4']);
+  });
+
+  it('flags the tool state as blocked when capacity is too low', async () => {
+    mocks.getSendCapacity.mockResolvedValue({ remaining: 2 });
+    const built = buildPhotoTool({ tenantId: 't1', conversationId: 'c1' });
+    await built.tool.execute!({ category: 'room_4' }, { toolCallId: 'x', messages: [] });
+    expect(built.state.blocked).toBe(true);
+    expect(built.queued).toEqual([]);
+  });
+
+  it('reserves one send slot for the text reply', async () => {
+    mocks.countCategoryPhotos.mockResolvedValue(5);
+    mocks.getSendCapacity.mockResolvedValue({ remaining: 5 });
+    expect(await decidePhotoRequest({ ...base, category: 'room_4' })).toEqual({ status: 'blocked' });
+    mocks.getSendCapacity.mockResolvedValue({ remaining: 6 });
+    expect(await decidePhotoRequest({ ...base, category: 'room_4' })).toEqual({ status: 'queued' });
+  });
+});
+
 describe('photoPromptSection', () => {
   it('lists the categories with counts and mentions the tool', () => {
     const text = photoPromptSection([{ id: 'room_4', label: '4-местный номер', count: 3 }]);

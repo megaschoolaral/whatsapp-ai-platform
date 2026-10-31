@@ -146,5 +146,9 @@ async function flushBufferLocked(tenantId: string, jid: string): Promise<void> {
       return;
     }
   }
+  if (reply.photoBlocked) {
+    await setStatus(conversationId, 'awaiting_human', { handoffReason: 'photo_capacity' });
+    return;
+  }
   await scheduleFollowups(tenantId, conversationId, jid);
 }

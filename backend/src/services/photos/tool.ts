@@ -24,23 +24,32 @@ export async function decidePhotoRequest(args: {
   let queuedPhotos = 0;
   for (const q of alreadyQueued) queuedPhotos += await countCategoryPhotos(tenantId, q);
   const { remaining } = await getSendCapacity(tenantId);
-  if (remaining < queuedPhotos + count) return { status: 'blocked' };
+  // +1: the text reply sent before the photos uses one slot too
+  if (remaining < queuedPhotos + count + 1) return { status: 'blocked' };
   return { status: 'queued' };
 }
 
 export function buildPhotoTool(ctx: { tenantId: string; conversationId: string }) {
   const queued: PhotoCategoryId[] = [];
+  const state = { blocked: false };
+  // The SDK runs the tool calls of one step in parallel; decide them one at a time so the limits see each other.
+  let chain: Promise<unknown> = Promise.resolve();
   const photoTool = tool({
     description:
       'Send the hostel photos of one category to the client in WhatsApp. Call it when the client asks for photos or pictures of a category.',
     parameters: z.object({ category: z.string().describe('Category id from the list in the system prompt') }),
-    execute: async ({ category }) => {
-      const res = await decidePhotoRequest({ ...ctx, category, alreadyQueued: queued });
-      if (res.status === 'queued') queued.push(category as PhotoCategoryId);
-      return res;
+    execute: ({ category }) => {
+      const run = chain.then(async () => {
+        const res = await decidePhotoRequest({ ...ctx, category, alreadyQueued: queued });
+        if (res.status === 'queued') queued.push(category as PhotoCategoryId);
+        if (res.status === 'blocked') state.blocked = true;
+        return res;
+      });
+      chain = run.catch(() => undefined);
+      return run;
     },
   });
-  return { tool: photoTool, queued };
+  return { tool: photoTool, queued, state };
 }
 
 export function photoPromptSection(categories: { id: PhotoCategoryId; label: string; count: number }[]): string {

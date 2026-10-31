@@ -5,7 +5,7 @@ import { queryCorpus } from './rag.js';
 import type { TenantContext } from '../tenantContext.js';
 import { buildPhotoTool, photoPromptSection } from '../photos/tool.js';
 import { listPhotoSummary } from '../photos/store.js';
-import type { PhotoCategoryId } from '../photos/categories.js';
+import { MAX_CATEGORIES_PER_REPLY, type PhotoCategoryId } from '../photos/categories.js';
 
 export interface ChatTurn {
   role: 'user' | 'assistant';
@@ -28,6 +28,8 @@ export interface GenerateReplyResult {
   ragUsed: boolean;
   /** Photo categories the AI asked to send after the text reply. */
   photoCategories: PhotoCategoryId[];
+  /** The AI wanted to send photos but the anti-ban limits could not fit them: a human should follow up. */
+  photoBlocked: boolean;
 }
 
 function systemMessage(tenant: TenantContext, ragContext: string, isFirstMessage: boolean): string {
@@ -127,7 +129,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
       outputTokens,
       conversationId,
     });
-    const queued = photo ? [...photo.queued] : [];
+    const queued = photo ? [...new Set(photo.queued)].slice(0, MAX_CATEGORIES_PER_REPLY) : [];
     const raw = stripRepeatedGreeting(result.text, history.length === 0);
     return {
       text: raw.trim() || (queued.length ? FALLBACK_PHOTO_TEXT : raw),
@@ -135,6 +137,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
       outputTokens,
       ragUsed: !!ragContext,
       photoCategories: queued,
+      photoBlocked: photo?.state.blocked ?? false,
     };
   };
 

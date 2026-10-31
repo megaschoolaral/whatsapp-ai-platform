@@ -7,12 +7,14 @@ const mocks = vi.hoisted(() => ({
   deleteManyPhoto: vi.fn(),
   deleteManySend: vi.fn(),
   findFirst: vi.fn(),
+  executeRaw: vi.fn(),
 }));
 
 vi.mock('../../prisma.js', () => {
   const tx = {
     propertyPhoto: { count: mocks.count, create: mocks.create },
     photoSend: { deleteMany: mocks.deleteManySend },
+    $executeRaw: mocks.executeRaw,
   };
   return {
     prisma: {
@@ -35,6 +37,7 @@ beforeEach(() => {
   mocks.create.mockResolvedValue({ id: 'p1' });
   mocks.deleteManyPhoto.mockResolvedValue({ count: 1 });
   mocks.deleteManySend.mockResolvedValue({ count: 0 });
+  mocks.executeRaw.mockResolvedValue(0);
 });
 
 describe('addPhoto', () => {
@@ -59,6 +62,34 @@ describe('addPhoto', () => {
     expect(res).toEqual({ id: 'p1' });
     expect(mocks.create.mock.calls[0][0].data).toMatchObject({ tenantId: 't1', category: 'room_4', mimeType: 'image/jpeg' });
     expect(mocks.deleteManySend).toHaveBeenCalledWith({ where: { tenantId: 't1', category: 'room_4' } });
+  });
+});
+
+describe('addPhoto hardening', () => {
+  it('rejects a truncated jpeg whose header is readable but whose pixels are not', async () => {
+    const full = await sharp({ create: { width: 600, height: 600, channels: 3, background: '#a33' } })
+      .jpeg()
+      .toBuffer();
+    await expect(addPhoto('t1', 'room_4', full.subarray(0, Math.floor(full.length / 3)), 'image/jpeg')).rejects.toBeInstanceOf(
+      InvalidImageError,
+    );
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('always stores image/jpeg, whatever mime type the client claimed', async () => {
+    await addPhoto('t1', 'room_4', await png(), 'image/webp');
+    expect(mocks.create.mock.calls[0][0].data.mimeType).toBe('image/jpeg');
+  });
+
+  it('takes a per-category lock before counting so concurrent uploads cannot both take the last slot', async () => {
+    const order: string[] = [];
+    mocks.executeRaw.mockImplementation(async () => void order.push('lock'));
+    mocks.count.mockImplementation(async () => {
+      order.push('count');
+      return 0;
+    });
+    await addPhoto('t1', 'room_4', await png(), 'image/png');
+    expect(order).toEqual(['lock', 'count']);
   });
 });
 
