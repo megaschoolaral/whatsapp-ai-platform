@@ -50,3 +50,19 @@ export async function sendHumanLikeText(args: {
   await args.sock.sendMessage(args.jid, { text: args.text });
   return { sent: true };
 }
+
+export async function sendHumanLikePhoto(args: {
+  tenantId: string;
+  sock: Sock;
+  jid: string;
+  image: Buffer;
+  mimeType: string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  const limits = await canSendAndIncrement(args.tenantId);
+  if (!limits.allowed) {
+    return { sent: false, reason: limits.reason };
+  }
+  await delay(randomBetween(1000, 3000));
+  await args.sock.sendMessage(args.jid, { image: args.image, mimetype: args.mimeType });
+  return { sent: true };
+}

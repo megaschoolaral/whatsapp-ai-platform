@@ -3,7 +3,7 @@ import { prisma } from '../../prisma.js';
 import { readAndClearBuffer, scheduleFlush } from './buffer.js';
 import { redis } from '../../redis.js';
 import { loadTenantContext } from '../tenantContext.js';
-import { generateReply, type ChatTurn } from '../ai/generate.js';
+import { generateReply, type ChatTurn, type GenerateReplyResult } from '../ai/generate.js';
 import { getConversationHistory, appendMessage } from '../conversations/store.js';
 import { setStatus } from '../conversations/stateMachine.js';
 import { shouldHandoff } from '../conversations/handoff.js';
@@ -11,6 +11,7 @@ import { sendHumanLikeText } from '../whatsapp/outbound.js';
 import { getSession } from '../whatsapp/manager.js';
 import { emitToTenant } from '../realtime/socketRooms.js';
 import { scheduleFollowups } from '../followup/scheduler.js';
+import { sendQueuedPhotos } from '../photos/send.js';
 
 const FLUSH_LOCK_TTL_S = 180;
 const FLUSH_BUSY_RETRY_MS = 5_000;
@@ -85,7 +86,7 @@ async function flushBufferLocked(tenantId: string, jid: string): Promise<void> {
     return;
   }
 
-  let reply: { text: string; inputTokens: number; outputTokens: number };
+  let reply: GenerateReplyResult;
   try {
     reply = await generateReply({
       tenant,
@@ -130,5 +131,20 @@ async function flushBufferLocked(tenantId: string, jid: string): Promise<void> {
     sentBy: 'ai',
     content: reply.text,
   });
+
+  if (reply.photoCategories.length) {
+    const photos = await sendQueuedPhotos({
+      tenantId,
+      conversationId,
+      jid,
+      sock: session.sock,
+      categories: reply.photoCategories,
+    });
+    if (!photos.ok) {
+      logger.warn({ tenantId, reason: photos.reason }, '[flush] photo send failed');
+      await setStatus(conversationId, 'awaiting_human', { handoffReason: photos.reason ?? 'photo_send_failed' });
+      return;
+    }
+  }
   await scheduleFollowups(tenantId, conversationId, jid);
 }
