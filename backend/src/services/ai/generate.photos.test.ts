@@ -29,8 +29,8 @@ const summaryWithPhotos = [
   { id: 'kitchen', label: 'Кухня', photos: [] },
 ];
 
-function model(supportsTools: boolean) {
-  mocks.resolveTextModel.mockReturnValue({ meta: { provider: 'openai', supportsVision: false, supportsTools }, sdkModel: {} });
+function model(supportsTools: boolean, provider = 'openai') {
+  mocks.resolveTextModel.mockReturnValue({ meta: { provider, supportsVision: false, supportsTools }, sdkModel: {} });
 }
 
 beforeEach(() => {
@@ -66,6 +66,17 @@ describe('generateReply photos', () => {
     const res = await generateReply(args);
     expect(res.photoCategories.length).toBeLessThanOrEqual(2);
     expect(new Set(res.photoCategories).size).toBe(res.photoCategories.length);
+  });
+
+  it('does not continue after the tool call on Google models (Gemini 3 needs thought signatures the SDK drops)', async () => {
+    model(true, 'google');
+    await generateReply(args);
+    expect(mocks.generateText.mock.calls[0][0].maxSteps).toBe(1);
+  });
+
+  it('keeps multi-step tool calls on other providers', async () => {
+    await generateReply(args);
+    expect(mocks.generateText.mock.calls[0][0].maxSteps).toBe(3);
   });
 
   it('passes no tools when the tenant has no photos', async () => {

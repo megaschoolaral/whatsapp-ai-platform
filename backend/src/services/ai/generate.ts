@@ -113,11 +113,15 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
   }
   const system = () => systemMessage(tenant, ragContext, history.length === 0) + photoPrompt;
 
+  // Gemini 3 rejects the follow-up step (400 "missing a thought_signature"): the SDK does not echo the signature back.
+  // So on Google the tool call ends the turn; the text written next to it (or the fallback) is the reply.
+  const photoMaxSteps = textModel.meta.provider === 'google' ? 1 : 3;
+
   const run = async (messages: CoreMessage[]) => {
     const result = await generateText({
       model: textModel.sdkModel,
       messages,
-      ...(photo ? { tools: { send_photos: photo.tool }, maxSteps: 3 } : {}),
+      ...(photo ? { tools: { send_photos: photo.tool }, maxSteps: photoMaxSteps } : {}),
     });
     const inputTokens = result.usage?.promptTokens ?? 0;
     const outputTokens = result.usage?.completionTokens ?? 0;
