@@ -11,6 +11,9 @@ const schema = z.object({
   SUPER_ADMIN_EMAIL: z.string().email().optional(),
   SUPER_ADMIN_PASSWORD: z.string().optional(),
   APP_URL: z.string().url().default('http://localhost:3000'),
+  // Operator alerts (e.g. WhatsApp disconnected). Optional: without them alerts are only logged.
+  TELEGRAM_ALERT_BOT_TOKEN: z.string().min(1).optional(),
+  TELEGRAM_ALERT_CHAT_ID: z.string().min(1).optional(),
 });
 
 const parsed = schema.safeParse(process.env);

@@ -12,6 +12,7 @@ import { emitToTenant } from '../realtime/socketRooms.js';
 import { handleIncomingMessage, handleOutgoingFromPhone } from './inbound.js';
 import { handlePresenceUpdate } from './presence.js';
 import { upsertSavedContacts } from './savedContacts.js';
+import { markIntentionalDisconnect, notifyConnected, notifyDisconnected } from '../alerts/whatsappAlerts.js';
 
 const connecting = new Set<string>();
 
@@ -104,6 +105,7 @@ async function connectTenantInner(tenantId: string): Promise<void> {
         }
       }
       emitToTenant(tenantId, 'whatsapp:status', { tenantId, status: 'connected' });
+      notifyConnected(tenantId);
     }
     if (connection === 'close') {
       const reason = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
@@ -115,6 +117,7 @@ async function connectTenantInner(tenantId: string): Promise<void> {
       });
       updateSession(tenantId, { status: 'closed' });
       emitToTenant(tenantId, 'whatsapp:status', { tenantId, status: 'disconnected', reason: String(reason) });
+      notifyDisconnected(tenantId, reason);
 
       switch (reason) {
         case DisconnectReason.loggedOut:
@@ -186,6 +189,7 @@ async function connectTenantInner(tenantId: string): Promise<void> {
 export async function disconnectTenant(tenantId: string): Promise<void> {
   const entry = getSession(tenantId);
   if (entry) {
+    markIntentionalDisconnect(tenantId); // the logout's own `close` event must not page the operator
     try {
       await entry.sock.logout();
     } catch {
