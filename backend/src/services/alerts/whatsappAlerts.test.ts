@@ -2,9 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sendAdminAlert = vi.fn();
 const findUnique = vi.fn();
+// Fake Redis: a plain map, so tests can also simulate a restart (memory wiped, Redis kept).
+const { store, redisFake } = vi.hoisted(() => {
+  const store = new Map<string, string>();
+  const redisFake = {
+    set: async (key: string, value: string, mode?: string) => {
+      if (mode === 'NX' && store.has(key)) return null;
+      store.set(key, value);
+      return 'OK';
+    },
+    del: async (key: string) => (store.delete(key) ? 1 : 0),
+  };
+  return { store, redisFake };
+});
 
 vi.mock('./adminTelegram.js', () => ({ sendAdminAlert: (t: string) => sendAdminAlert(t) }));
 vi.mock('../../prisma.js', () => ({ prisma: { tenant: { findUnique: (a: unknown) => findUnique(a) } } }));
+vi.mock('../../redis.js', () => ({ redis: redisFake }));
 vi.mock('../../logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 import {
@@ -30,6 +44,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   sendAdminAlert.mockReset().mockResolvedValue(true);
   findUnique.mockReset().mockResolvedValue(tenant());
+  store.clear();
   _resetAlertState();
 });
 afterEach(() => vi.useRealTimers());
@@ -94,6 +109,28 @@ describe('notifyDisconnected', () => {
     notifyDisconnected('t1', 408);
     await vi.advanceTimersByTimeAsync(SOFT_ALERT_DELAY_MS + 1000);
     expect(sendAdminAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not repeat the alert after a restart in the middle of the outage', async () => {
+    notifyDisconnected('t1', 401);
+    await flush();
+    expect(sendAdminAlert).toHaveBeenCalledTimes(1);
+    _resetAlertState(); // process restarted: memory is gone, the Redis marker is not
+    notifyDisconnected('t1', 401);
+    await flush();
+    expect(sendAdminAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it('alerts again for a new outage after the tenant reconnected', async () => {
+    notifyDisconnected('t1', 500);
+    await flush();
+    notifyConnected('t1');
+    await flush();
+    sendAdminAlert.mockClear();
+    notifyDisconnected('t1', 500);
+    await flush();
+    expect(sendAdminAlert).toHaveBeenCalledTimes(1);
+    expect(sendAdminAlert.mock.calls[0]![0]).toContain('⚠️');
   });
 
   it('stays silent for a deliberate disconnect', async () => {

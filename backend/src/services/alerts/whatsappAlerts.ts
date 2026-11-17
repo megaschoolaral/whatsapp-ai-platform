@@ -1,6 +1,7 @@
 import { DisconnectReason } from 'baileys';
 import { logger } from '../../logger.js';
 import { prisma } from '../../prisma.js';
+import { redis } from '../../redis.js';
 import { sendAdminAlert } from './adminTelegram.js';
 
 /** Transient drops reconnect on their own; only alert if the tenant is still offline after this long. */
@@ -17,8 +18,18 @@ const HARD_REASONS = new Set<number>([
 ]);
 
 const pending = new Map<string, NodeJS.Timeout>();
-const alerted = new Set<string>();
 const intentional = new Map<string, NodeJS.Timeout>();
+
+/**
+ * "Outage already reported" marker. It lives in Redis (not memory) so a deploy or restart in the
+ * middle of an outage does not report it again: one alert per outage, cleared on reconnect.
+ */
+const alertedKey = (tenantId: string) => `alerts:wa-disconnected:${tenantId}`;
+
+/** Atomically marks the outage as reported; `false` if it already was. */
+async function claimOutage(tenantId: string): Promise<boolean> {
+  return (await redis.set(alertedKey(tenantId), '1', 'NX')) === 'OK';
+}
 
 export function isHardReason(reason: number | undefined): boolean {
   return reason !== undefined && HARD_REASONS.has(reason);
@@ -60,6 +71,7 @@ async function sendDisconnectAlert(tenantId: string, reason: number | undefined,
   const tenant = await loadTenant(tenantId);
   if (!tenant || tenant.status !== 'active') return;
   if (tenant.whatsappSession?.status === 'connected') return; // came back while we waited
+  if (!(await claimOutage(tenantId))) return; // this outage was already reported
   const phone = tenant.whatsappSession?.phoneNumber ? ` (${tenant.whatsappSession.phoneNumber})` : '';
   const action = hard
     ? 'Бот сам не переподключится — нужно заново отсканировать QR в кабинете тенанта.'
@@ -67,7 +79,8 @@ async function sendDisconnectAlert(tenantId: string, reason: number | undefined,
   const sent = await sendAdminAlert(
     `⚠️ WhatsApp отключён\nТенант: ${tenant.name}${phone}\nПричина: ${describeReason(reason)}\n${action}`,
   );
-  if (sent) alerted.add(tenantId);
+  // A failed send must not use up the one alert: release the marker so the next drop can retry.
+  if (!sent) await redis.del(alertedKey(tenantId)).catch(() => undefined);
 }
 
 /** Entry point from the Baileys `connection === 'close'` handler. Never throws. */
@@ -75,7 +88,6 @@ export function notifyDisconnected(tenantId: string, reason: number | undefined)
   if (intentional.has(tenantId)) return;
   clearTimeout(pending.get(tenantId));
   pending.delete(tenantId);
-  if (alerted.has(tenantId)) return; // one alert per outage
 
   const hard = isHardReason(reason);
   const run = () => {
@@ -99,21 +111,22 @@ export function notifyConnected(tenantId: string): void {
   pending.delete(tenantId);
   clearTimeout(intentional.get(tenantId));
   intentional.delete(tenantId);
-  if (!alerted.delete(tenantId)) return; // we never reported an outage, so nothing to retract
 
-  loadTenant(tenantId)
-    .then((tenant) => {
+  redis
+    .del(alertedKey(tenantId))
+    .then(async (removed) => {
+      if (removed === 0) return; // we never reported an outage, so nothing to retract
+      const tenant = await loadTenant(tenantId);
       if (!tenant) return;
-      return sendAdminAlert(`✅ WhatsApp снова подключён\nТенант: ${tenant.name}`);
+      await sendAdminAlert(`✅ WhatsApp снова подключён\nТенант: ${tenant.name}`);
     })
     .catch((err) => logger.error({ err, tenantId }, '[alerts] reconnect alert failed'));
 }
 
-/** Test helper. */
+/** Test helper: drops in-memory timers (the Redis marker is the test's own fake). */
 export function _resetAlertState(): void {
   for (const t of pending.values()) clearTimeout(t);
   for (const t of intentional.values()) clearTimeout(t);
   pending.clear();
   intentional.clear();
-  alerted.clear();
 }
