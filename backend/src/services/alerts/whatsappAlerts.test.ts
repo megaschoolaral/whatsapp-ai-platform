@@ -73,6 +73,21 @@ describe('notifyDisconnected', () => {
     expect(text).toContain('QR');
   });
 
+  it('treats a hard reason as soft while the bot is retrying on its own', async () => {
+    notifyDisconnected('t1', 500, true);
+    await flush();
+    expect(sendAdminAlert).not.toHaveBeenCalled(); // no instant page while a retry may still fix it
+    notifyConnected('t1');
+    await vi.advanceTimersByTimeAsync(SOFT_ALERT_DELAY_MS + 1000);
+    expect(sendAdminAlert).not.toHaveBeenCalled(); // recovered, so nothing was ever reported
+  });
+
+  it('still alerts if the retried 500 does not recover within the delay', async () => {
+    notifyDisconnected('t1', 500, true);
+    await vi.advanceTimersByTimeAsync(SOFT_ALERT_DELAY_MS + 1000);
+    expect(sendAdminAlert).toHaveBeenCalledTimes(1);
+  });
+
   it('waits for a soft drop and alerts only if the tenant is still offline', async () => {
     notifyDisconnected('t1', 408);
     await vi.advanceTimersByTimeAsync(SOFT_ALERT_DELAY_MS - 1000);

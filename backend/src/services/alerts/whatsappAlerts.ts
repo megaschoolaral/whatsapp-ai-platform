@@ -83,13 +83,17 @@ async function sendDisconnectAlert(tenantId: string, reason: number | undefined,
   if (!sent) await redis.del(alertedKey(tenantId)).catch(() => undefined);
 }
 
-/** Entry point from the Baileys `connection === 'close'` handler. Never throws. */
-export function notifyDisconnected(tenantId: string, reason: number | undefined): void {
+/**
+ * Entry point from the Baileys `connection === 'close'` handler. Never throws.
+ * `recovering`: the bot is already retrying on its own (e.g. a 500 within the retry budget),
+ * so even a normally "hard" reason is treated as soft and only alerts if the outage persists.
+ */
+export function notifyDisconnected(tenantId: string, reason: number | undefined, recovering = false): void {
   if (intentional.has(tenantId)) return;
   clearTimeout(pending.get(tenantId));
   pending.delete(tenantId);
 
-  const hard = isHardReason(reason);
+  const hard = !recovering && isHardReason(reason);
   const run = () => {
     pending.delete(tenantId);
     sendDisconnectAlert(tenantId, reason, hard).catch((err) =>
