@@ -13,6 +13,7 @@ import { StepWhatsapp } from './steps/StepWhatsapp';
 import { StepKnowledge } from './steps/StepKnowledge';
 import { StepFollowups } from './steps/StepFollowups';
 import { StepReceiptCheck } from './steps/StepReceiptCheck';
+import { StepSheets } from './steps/StepSheets';
 
 interface OnboardingState {
   status: 'pending_setup' | 'active' | 'suspended';
@@ -208,6 +209,20 @@ export function OnboardingChecklistPage() {
           </CardHeader>
           <CardContent>
             <StepReceiptCheck tenantId={tenantId} />
+          </CardContent>
+        </Card>
+      )}
+
+      {tenantId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Google Sheets (жазылу)</CardTitle>
+            <CardDescription>
+              AI менеджер кестеден бос уақытты қарап, клиенттің аты мен телефонын сол кестеге жазады.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <StepSheets tenantId={tenantId} />
           </CardContent>
         </Card>
       )}
