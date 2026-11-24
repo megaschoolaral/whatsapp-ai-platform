@@ -165,6 +165,8 @@ describe('prompt text', () => {
     expect(text).toContain('morning or afternoon');
     expect(text).toContain('one or two');
     expect(text).not.toContain('every free time');
+    expect(text).toContain('asks whether there is room');
+    expect(text).toContain('Do not name any time in that first reply');
   });
 
   it('lists free slots by date and forbids claiming a booking without the tool result', () => {
