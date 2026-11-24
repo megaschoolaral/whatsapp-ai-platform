@@ -6,6 +6,17 @@ import type { TenantContext } from '../tenantContext.js';
 import { buildPhotoTool, photoPromptSection } from '../photos/tool.js';
 import { listPhotoSummary } from '../photos/store.js';
 import { MAX_CATEGORIES_PER_REPLY, type PhotoCategoryId } from '../photos/categories.js';
+import { logger } from '../../logger.js';
+import { getSheetsSettings } from '../sheets/settings.js';
+import { readSlots } from '../sheets/read.js';
+import { upcomingFreeSlots } from '../sheets/schedule.js';
+import {
+  buildSheetsTool,
+  conflictReply,
+  failedReply,
+  sheetsPromptSection,
+  sheetsUnavailablePrompt,
+} from '../sheets/tool.js';
 
 export interface ChatTurn {
   role: 'user' | 'assistant';
@@ -30,6 +41,10 @@ export interface GenerateReplyResult {
   photoCategories: PhotoCategoryId[];
   /** The AI wanted to send photos but the anti-ban limits could not fit them: a human should follow up. */
   photoBlocked: boolean;
+  /** The AI booked a slot in the tenant's Google Sheet. */
+  sheetsBooked: boolean;
+  /** Sheets could not be read or written: a human should follow up. */
+  sheetsFailed: boolean;
 }
 
 function systemMessage(tenant: TenantContext, ragContext: string, isFirstMessage: boolean): string {
@@ -111,17 +126,41 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
       photoPrompt = photoPromptSection(categories);
     }
   }
-  const system = () => systemMessage(tenant, ragContext, history.length === 0) + photoPrompt;
+
+  // Sheets booking: only when the tenant switched it on and the model can call tools.
+  let sheets: ReturnType<typeof buildSheetsTool> | null = null;
+  let sheetsPrompt = '';
+  let sheetsReadFailed = false;
+  if (conversationId && textModel.meta.supportsTools) {
+    const settings = await getSheetsSettings(tenant.id);
+    if (settings.enabled) {
+      try {
+        const free = upcomingFreeSlots(await readSlots(tenant.id), new Date(), tenant.timezone, settings.daysAhead);
+        sheets = buildSheetsTool({ tenantId: tenant.id });
+        sheetsPrompt = sheetsPromptSection(free);
+      } catch (err) {
+        logger.error({ err, tenantId: tenant.id }, 'sheets: could not read the schedule');
+        sheetsPrompt = sheetsUnavailablePrompt();
+        sheetsReadFailed = true;
+      }
+    }
+  }
+  const system = () => systemMessage(tenant, ragContext, history.length === 0) + photoPrompt + sheetsPrompt;
 
   // Gemini 3 rejects the follow-up step (400 "missing a thought_signature"): the SDK does not echo the signature back.
   // So on Google the tool call ends the turn; the text written next to it (or the fallback) is the reply.
-  const photoMaxSteps = textModel.meta.provider === 'google' ? 1 : 3;
+  const maxSteps = textModel.meta.provider === 'google' ? 1 : 3;
 
   const run = async (messages: CoreMessage[]) => {
     const result = await generateText({
       model: textModel.sdkModel,
       messages,
-      ...(photo ? { tools: { send_photos: photo.tool }, maxSteps: photoMaxSteps } : {}),
+      ...(photo || sheets
+        ? {
+            tools: { ...(photo ? { send_photos: photo.tool } : {}), ...(sheets ? { book_slot: sheets.tool } : {}) },
+            maxSteps,
+          }
+        : {}),
     });
     const inputTokens = result.usage?.promptTokens ?? 0;
     const outputTokens = result.usage?.completionTokens ?? 0;
@@ -135,13 +174,28 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     });
     const queued = photo ? [...new Set(photo.queued)].slice(0, MAX_CATEGORIES_PER_REPLY) : [];
     const raw = stripRepeatedGreeting(result.text, history.length === 0);
+    let text = raw.trim() || (queued.length ? FALLBACK_PHOTO_TEXT : raw);
+    // The model writes its text before it sees the tool result (always on Google), so the text must never claim a booking that did not happen.
+    if (sheets?.state.failed) {
+      text = failedReply();
+    } else if (sheets?.state.conflict && !sheets.state.booked) {
+      try {
+        const free = upcomingFreeSlots(await readSlots(tenant.id, { fresh: true }), new Date(), tenant.timezone, 7);
+        text = conflictReply(free);
+      } catch {
+        text = failedReply();
+        sheets.state.failed = true;
+      }
+    }
     return {
-      text: raw.trim() || (queued.length ? FALLBACK_PHOTO_TEXT : raw),
+      text,
       inputTokens,
       outputTokens,
       ragUsed: !!ragContext,
       photoCategories: queued,
       photoBlocked: photo?.state.blocked ?? false,
+      sheetsBooked: sheets?.state.booked ?? false,
+      sheetsFailed: sheetsReadFailed || (sheets?.state.failed ?? false),
     };
   };
 

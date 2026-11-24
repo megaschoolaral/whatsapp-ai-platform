@@ -19,6 +19,7 @@ vi.mock('../photos/store.js', () => ({
   countCategoryPhotos: mocks.countCategoryPhotos,
 }));
 vi.mock('../whatsapp/antiBan.js', () => ({ getSendCapacity: mocks.getSendCapacity }));
+vi.mock('../sheets/settings.js', () => ({ getSheetsSettings: async () => ({ enabled: false }) }));
 
 import { generateReply } from './generate.js';
 

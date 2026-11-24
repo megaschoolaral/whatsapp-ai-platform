@@ -150,5 +150,9 @@ async function flushBufferLocked(tenantId: string, jid: string): Promise<void> {
     await setStatus(conversationId, 'awaiting_human', { handoffReason: 'photo_capacity' });
     return;
   }
+  if (reply.sheetsFailed) {
+    await setStatus(conversationId, 'awaiting_human', { handoffReason: 'sheets_error' });
+    return;
+  }
   await scheduleFollowups(tenantId, conversationId, jid);
 }

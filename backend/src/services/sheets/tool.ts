@@ -115,3 +115,8 @@ export function conflictReply(freeSlots: Slot[]): string {
     .join('\n');
   return `Это время уже занято. Свободно:\n${list}\nНапишите, какое время вам подходит.`;
 }
+
+/** Our own reply when the schedule could not be written: a manager takes over. */
+export function failedReply(): string {
+  return 'Не получилось записать вас автоматически. Наш менеджер свяжется с вами и подтвердит запись.';
+}
