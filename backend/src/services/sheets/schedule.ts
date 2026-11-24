@@ -29,7 +29,11 @@ export function parseSchedule(values: string[][], today: Date): Slot[] {
   let date: string | null = null;
   values.forEach((cells, index) => {
     const first = (cells[0] ?? '').trim();
-    const title = first.match(TITLE_WEEKDAY_FIRST) ?? first.match(TITLE_DATE_FIRST);
+    // The day title may sit in any column (a merged or centred cell); a time in column A means it is a slot row.
+    const titleCell = TIME.test(first)
+      ? first
+      : (cells.map((c) => (c ?? '').trim()).find((c) => TITLE_WEEKDAY_FIRST.test(c) || TITLE_DATE_FIRST.test(c)) ?? first);
+    const title = titleCell.match(TITLE_WEEKDAY_FIRST) ?? titleCell.match(TITLE_DATE_FIRST);
     if (title) {
       date = resolveDate(Number(title[1]), Number(title[2]), today);
       return;

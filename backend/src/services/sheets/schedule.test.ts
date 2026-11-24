@@ -107,6 +107,28 @@ describe('parseSchedule with the clinic real sheet (date first, then weekday)', 
   });
 });
 
+describe('parseSchedule when the day title is not in column A', () => {
+  // Real layout of the December sheet: a section name in A1, the day title in D2, times in A.
+  const sheet = [
+    ['Травматология'],
+    ['', '', '', '01.12 вт'],
+    ['8:00'],
+    ['8:30', 'Асель', '87071112233'],
+    [],
+    ['', '', '', '02.12 ср'],
+    ['8:00'],
+  ];
+  const parsed = parseSchedule(sheet, new Date('2026-11-24T05:00:00Z'));
+
+  it('takes the day from a title in any column and ignores the section name', () => {
+    expect(parsed).toEqual([
+      { date: '2026-12-01', time: '08:00', row: 3, free: true },
+      { date: '2026-12-01', time: '08:30', row: 4, free: false },
+      { date: '2026-12-02', time: '08:00', row: 7, free: true },
+    ]);
+  });
+});
+
 describe('upcomingFreeSlots', () => {
   const slots = parseSchedule(sheet, today);
   // 2026-11-02 13:15 in Asia/Almaty (UTC+5) is 08:15 UTC
