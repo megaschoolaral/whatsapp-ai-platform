@@ -160,6 +160,12 @@ describe('prompt text', () => {
     expect(text).toContain('WhatsApp profile name');
   });
 
+  it('tells the model to name every free time of the day, half hours included, without rounding or skipping', () => {
+    const text = sheetsPromptSection([slot({ time: '09:00' }), slot({ time: '09:30', row: 8 })]);
+    expect(text).toContain('every free time');
+    expect(text).toContain('09:30');
+  });
+
   it('lists free slots by date and forbids claiming a booking without the tool result', () => {
     const text = sheetsPromptSection([slot(), slot({ time: '09:30', row: 8 })]);
     expect(text).toContain(D);

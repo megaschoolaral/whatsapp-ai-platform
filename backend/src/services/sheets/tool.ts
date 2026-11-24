@@ -162,6 +162,7 @@ export function sheetsPromptSection(freeSlots: Slot[]): string {
   return `\n\nBOOKING: you can book the client into the clinic schedule with the book_slot tool. Free slots (date: times):\n${list}
 Rules:
 - Offer only times from this list. Never invent a time.
+- When the client asks which times are free on a day, name every free time of that day exactly as in the list, half hours included (for example 09:00, 09:30, 10:00, 10:30). Do not round to whole hours, skip times, or summarize them as a range.
 - Before booking you need the client's full name (first and last name, as it should be written in the schedule) and phone number. Ask for both in one message and always ask for the name, even if you can see the WhatsApp profile name. Never use the WhatsApp profile name and never guess a name.
 - Tool result "missing_details": the name or phone was not real; ask the client for them again.
 - Call book_slot only after the client chose a time. Use the date and time exactly as in the list.
