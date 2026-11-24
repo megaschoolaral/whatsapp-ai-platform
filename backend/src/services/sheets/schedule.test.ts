@@ -49,6 +49,30 @@ describe('parseSchedule', () => {
   });
 });
 
+describe('parseSchedule tolerance', () => {
+  it.each(['Пн, 02.11', 'пн 02, 11', 'понедельник 02.11', 'пн 02.11.2026', 'пн. 02.11', 'пн 02 ,11', 'пн 02/11'])(
+    'reads the title %j',
+    (title) => {
+      expect(parseSchedule([[title], ['10:00']], today)).toEqual([{ date: '2026-11-02', time: '10:00', row: 2, free: true }]);
+    },
+  );
+
+  it('does not put the slots under a title it cannot read onto the previous day', () => {
+    const parsed = parseSchedule([['пн 25,11'], ['10:00'], ['вт 26-11'], ['11:00']], today);
+    expect(parsed.map((s) => s.time)).toEqual(['10:00']);
+  });
+
+  it.each([
+    ['09:00:00', '09:00'],
+    ['9:00 AM', '09:00'],
+    ['1:30 PM', '13:30'],
+    ['12:00 AM', '00:00'],
+    ['9.00', '09:00'],
+  ])('reads the time %j as %s', (cell, expected) => {
+    expect(parseSchedule([['пн 02,11'], [cell]], today)[0]?.time).toBe(expected);
+  });
+});
+
 describe('upcomingFreeSlots', () => {
   const slots = parseSchedule(sheet, today);
   // 2026-11-02 13:15 in Asia/Almaty (UTC+5) is 08:15 UTC

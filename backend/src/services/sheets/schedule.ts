@@ -1,7 +1,10 @@
 import type { Slot } from './types.js';
 
-const TITLE = /^(?:пн|вт|ср|чт|пт|сб|вс)\s+(\d{1,2})[.,](\d{1,2})$/i;
-const TIME = /^(\d{1,2}):(\d{2})$/;
+const WEEKDAY = '(?:понедельник|вторник|среда|четверг|пятница|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс)';
+const TITLE = new RegExp(`^${WEEKDAY}[\\s.,]*(\\d{1,2})\\s*[.,/]\\s*(\\d{1,2})(?:[.,/]\\d{2,4})?$`, 'i');
+const LOOKS_LIKE_TITLE = new RegExp(`^${WEEKDAY}(?![а-яё])`, 'i');
+// 9:00, 09:00:00, 9.00, 9:00 AM, 1:30 PM
+const TIME = /^(\d{1,2})[:.](\d{2})(?::\d{2})?\s*([ap]m)?$/i;
 const DAY_MS = 86_400_000;
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -28,10 +31,21 @@ export function parseSchedule(values: string[][], today: Date): Slot[] {
       date = resolveDate(Number(title[1]), Number(title[2]), today);
       return;
     }
+    if (LOOKS_LIKE_TITLE.test(first)) {
+      // A day title we cannot read: its slots must not end up under the previous day.
+      date = null;
+      return;
+    }
     const time = first.match(TIME);
     if (!time || !date) return;
+    let hour = Number(time[1]);
+    const minute = Number(time[2]);
+    const meridiem = time[3]?.toLowerCase();
+    if (meridiem === 'pm' && hour < 12) hour += 12;
+    if (meridiem === 'am' && hour === 12) hour = 0;
+    if (hour > 23 || minute > 59) return;
     const free = !(cells[1] ?? '').trim() && !(cells[2] ?? '').trim();
-    slots.push({ date, time: `${pad(Number(time[1]))}:${time[2]}`, row: index + 1, free });
+    slots.push({ date, time: `${pad(hour)}:${pad(minute)}`, row: index + 1, free });
   });
   return slots;
 }

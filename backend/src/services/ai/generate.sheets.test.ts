@@ -108,6 +108,38 @@ describe('generateReply sheets', () => {
     const call = mocks.generateText.mock.calls[0]![0];
     expect(call.tools).toBeUndefined();
     expect(call.messages[0].content).toContain('cannot be read');
-    expect(res.sheetsFailed).toBe(true);
+    // No booking was attempted, so this must not pull a human into every chat.
+    expect(res.sheetsFailed).toBe(false);
+  });
+
+  it('confirms the booking in our own words when the model wrote nothing', async () => {
+    mocks.generateText.mockImplementation(async (a: Tools) => {
+      await callBook(a);
+      return { text: '', usage };
+    });
+    const res = await generateReply(args);
+    expect(res.text).toContain(`${tomorrow.slice(8)}.${tomorrow.slice(5, 7)}`);
+    expect(res.text).toContain('23:30');
+  });
+
+  it('on Google always uses our confirmation, because the model wrote its text before the result', async () => {
+    model('google');
+    mocks.generateText.mockImplementation(async (a: Tools) => {
+      await callBook(a);
+      return { text: 'Сейчас проверю...', usage };
+    });
+    const res = await generateReply(args);
+    expect(res.text).not.toContain('проверю');
+    expect(res.text).toContain('23:30');
+  });
+
+  it('still confirms a booking that was written when the model call fails afterwards', async () => {
+    mocks.generateText.mockImplementation(async (a: Tools) => {
+      await callBook(a);
+      throw new Error('503');
+    });
+    const res = await generateReply(args);
+    expect(res.sheetsBooked).toBe(true);
+    expect(res.text).toContain('23:30');
   });
 });

@@ -12,6 +12,7 @@ import { readSlots } from '../sheets/read.js';
 import { upcomingFreeSlots } from '../sheets/schedule.js';
 import {
   buildSheetsTool,
+  bookedReply,
   conflictReply,
   failedReply,
   sheetsPromptSection,
@@ -130,7 +131,6 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
   // Sheets booking: only when the tenant switched it on and the model can call tools.
   let sheets: ReturnType<typeof buildSheetsTool> | null = null;
   let sheetsPrompt = '';
-  let sheetsReadFailed = false;
   if (conversationId && textModel.meta.supportsTools) {
     const settings = await getSheetsSettings(tenant.id);
     if (settings.enabled) {
@@ -141,7 +141,6 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
       } catch (err) {
         logger.error({ err, tenantId: tenant.id }, 'sheets: could not read the schedule');
         sheetsPrompt = sheetsUnavailablePrompt();
-        sheetsReadFailed = true;
       }
     }
   }
@@ -152,16 +151,24 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
   const maxSteps = textModel.meta.provider === 'google' ? 1 : 3;
 
   const run = async (messages: CoreMessage[]) => {
-    const result = await generateText({
-      model: textModel.sdkModel,
-      messages,
-      ...(photo || sheets
-        ? {
-            tools: { ...(photo ? { send_photos: photo.tool } : {}), ...(sheets ? { book_slot: sheets.tool } : {}) },
-            maxSteps,
-          }
-        : {}),
-    });
+    let result: Awaited<ReturnType<typeof generateText>>;
+    try {
+      result = await generateText({
+        model: textModel.sdkModel,
+        messages,
+        ...(photo || sheets
+          ? {
+              tools: { ...(photo ? { send_photos: photo.tool } : {}), ...(sheets ? { book_slot: sheets.tool } : {}) },
+              maxSteps,
+            }
+          : {}),
+      });
+    } catch (err) {
+      // The row is already written: the client must still hear about it instead of the turn being retried.
+      if (!sheets?.state.booked) throw err;
+      logger.error({ err, tenantId: tenant.id }, 'sheets: model call failed after a booking was written');
+      result = { text: '', usage: undefined } as unknown as typeof result;
+    }
     const inputTokens = result.usage?.promptTokens ?? 0;
     const outputTokens = result.usage?.completionTokens ?? 0;
     await logTextUsage({
@@ -178,6 +185,8 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     // The model writes its text before it sees the tool result (always on Google), so the text must never claim a booking that did not happen.
     if (sheets?.state.failed) {
       text = failedReply();
+    } else if (sheets?.state.booked && sheets.state.lastBooking && (!text.trim() || textModel.meta.provider === 'google')) {
+      text = bookedReply(sheets.state.lastBooking);
     } else if (sheets?.state.conflict && !sheets.state.booked) {
       try {
         const free = upcomingFreeSlots(await readSlots(tenant.id, { fresh: true }), new Date(), tenant.timezone, 7);
@@ -195,7 +204,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
       photoCategories: queued,
       photoBlocked: photo?.state.blocked ?? false,
       sheetsBooked: sheets?.state.booked ?? false,
-      sheetsFailed: sheetsReadFailed || (sheets?.state.failed ?? false),
+      sheetsFailed: sheets?.state.failed ?? false,
     };
   };
 
