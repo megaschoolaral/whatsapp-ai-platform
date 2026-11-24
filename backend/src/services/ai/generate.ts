@@ -10,11 +10,13 @@ import { logger } from '../../logger.js';
 import { getSheetsSettings } from '../sheets/settings.js';
 import { readSlots } from '../sheets/read.js';
 import { upcomingFreeSlots } from '../sheets/schedule.js';
+import { detectLang } from '../sheets/language.js';
 import {
   buildSheetsTool,
   bookedReply,
   conflictReply,
   failedReply,
+  needDetailsReply,
   sheetsPromptSection,
   sheetsUnavailablePrompt,
 } from '../sheets/tool.js';
@@ -183,16 +185,20 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     const raw = stripRepeatedGreeting(result.text, history.length === 0);
     let text = raw.trim() || (queued.length ? FALLBACK_PHOTO_TEXT : raw);
     // The model writes its text before it sees the tool result (always on Google), so the text must never claim a booking that did not happen.
+    const lang = detectLang([...history.filter((h) => h.role === 'user').slice(-3).map((h) => h.content), userMessage]);
+    const ownText = !text.trim() || textModel.meta.provider === 'google';
     if (sheets?.state.failed) {
-      text = failedReply();
-    } else if (sheets?.state.booked && sheets.state.lastBooking && (!text.trim() || textModel.meta.provider === 'google')) {
-      text = bookedReply(sheets.state.lastBooking);
+      text = failedReply(lang);
+    } else if (sheets?.state.booked && sheets.state.lastBooking && ownText) {
+      text = bookedReply(sheets.state.lastBooking, lang);
+    } else if (sheets?.state.missingDetails && !sheets.state.booked && !sheets.state.conflict && ownText) {
+      text = needDetailsReply(lang);
     } else if (sheets?.state.conflict && !sheets.state.booked) {
       try {
         const free = upcomingFreeSlots(await readSlots(tenant.id, { fresh: true }), new Date(), tenant.timezone, 7);
-        text = conflictReply(free);
+        text = conflictReply(free, lang);
       } catch {
-        text = failedReply();
+        text = failedReply(lang);
         sheets.state.failed = true;
       }
     }

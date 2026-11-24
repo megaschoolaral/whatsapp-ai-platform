@@ -7,7 +7,15 @@ import { getSheetsClient } from './client.js';
 import { invalidateSlots, readSlots } from './read.js';
 import { upcomingFreeSlots } from './schedule.js';
 import { getSheetsSettings } from './settings.js';
+import type { Lang } from './language.js';
 import type { Slot } from './types.js';
+
+/** A real person's name has letters (not just an emoji or a phone number) and the phone has 10-15 digits. */
+function detailsLookReal(name: string, phone: string): boolean {
+  const letters = name.match(/\p{L}/gu)?.length ?? 0;
+  const digits = phone.replace(/\D/g, '').length;
+  return letters >= 2 && digits >= 10 && digits <= 15;
+}
 
 export type BookStatus = 'booked' | 'taken' | 'not_found' | 'missing_details' | 'error';
 
@@ -51,7 +59,7 @@ export async function bookSlot(args: {
 }): Promise<{ status: BookStatus }> {
   const { tenantId, date, time, name, phone, comment } = args;
   // A row without name and phone still counts as free, so an empty booking would be reported but never held.
-  if (!name.trim() || !phone.trim()) return { status: 'missing_details' };
+  if (!detailsLookReal(name, phone)) return { status: 'missing_details' };
   try {
     return await withTenantLock(tenantId, () => writeBooking(args));
   } catch (err) {
@@ -107,6 +115,7 @@ async function writeBooking(args: {
 export function buildSheetsTool(ctx: { tenantId: string }) {
   const state = {
     conflict: false,
+    missingDetails: false,
     failed: false,
     booked: false,
     lastBooking: null as { date: string; time: string } | null,
@@ -131,6 +140,7 @@ export function buildSheetsTool(ctx: { tenantId: string }) {
           state.lastBooking = { date: input.date, time: input.time };
         }
         if (res.status === 'taken' || res.status === 'not_found') state.conflict = true;
+        if (res.status === 'missing_details') state.missingDetails = true;
         if (res.status === 'error') state.failed = true;
         return res;
       });
@@ -152,7 +162,8 @@ export function sheetsPromptSection(freeSlots: Slot[]): string {
   return `\n\nBOOKING: you can book the client into the clinic schedule with the book_slot tool. Free slots (date: times):\n${list}
 Rules:
 - Offer only times from this list. Never invent a time.
-- Before booking, make sure you know the client's name and phone number; ask for what is missing.
+- Before booking you need the client's full name (first and last name, as it should be written in the schedule) and phone number. Ask for both in one message and always ask for the name, even if you can see the WhatsApp profile name. Never use the WhatsApp profile name and never guess a name.
+- Tool result "missing_details": the name or phone was not real; ask the client for them again.
 - Call book_slot only after the client chose a time. Use the date and time exactly as in the list.
 - Tool result "booked": confirm the date and time in one short sentence.
 - Never say the client is booked unless the tool returned "booked".
@@ -163,24 +174,41 @@ export function sheetsUnavailablePrompt(): string {
   return '\n\nBOOKING: the clinic schedule cannot be read right now. Do not offer or promise any appointment time; tell the client a manager will contact them shortly.';
 }
 
+const dayMonth = (date: string) => `${date.slice(8)}.${date.slice(5, 7)}`;
+
 /** Our own reply when the chosen slot was taken before the write: the model's text must not claim a booking. */
-export function conflictReply(freeSlots: Slot[]): string {
+export function conflictReply(freeSlots: Slot[], lang: Lang = 'ru'): string {
   if (!freeSlots.length) {
-    return 'Это время уже занято. Свободных окон сейчас нет — наш менеджер свяжется с вами и подберёт время.';
+    return lang === 'kk'
+      ? 'Бұл уақыт бос емес. Қазір бос уақыт жоқ — менеджеріміз сізбен байланысып, уақыт таңдап береді.'
+      : 'Это время уже занято. Свободных окон сейчас нет — наш менеджер свяжется с вами и подберёт время.';
   }
   const list = freeSlots
     .slice(0, MAX_SLOTS_IN_CONFLICT_REPLY)
-    .map((s) => `${s.date} в ${s.time}`)
+    .map((s) => (lang === 'kk' ? `${dayMonth(s.date)} күні ${s.time}` : `${dayMonth(s.date)} в ${s.time}`))
     .join('\n');
-  return `Это время уже занято. Свободно:\n${list}\nНапишите, какое время вам подходит.`;
+  return lang === 'kk'
+    ? `Бұл уақыт бос емес. Бос уақыттар:\n${list}\nҚайсысы ыңғайлы екенін жазыңыз.`
+    : `Это время уже занято. Свободно:\n${list}\nНапишите, какое время вам подходит.`;
 }
 
 /** Our own confirmation: on Google the model's text is written before it sees the result, and it can be empty. */
-export function bookedReply(b: { date: string; time: string }): string {
-  return `Записала вас на ${b.date.slice(8)}.${b.date.slice(5, 7)} в ${b.time}. Ждём вас!`;
+export function bookedReply(b: { date: string; time: string }, lang: Lang = 'ru'): string {
+  return lang === 'kk'
+    ? `Сізді ${dayMonth(b.date)} күні сағат ${b.time}-ге жаздым. Күтеміз!`
+    : `Записала вас на ${dayMonth(b.date)} в ${b.time}. Ждём вас!`;
 }
 
 /** Our own reply when the schedule could not be written: a manager takes over. */
-export function failedReply(): string {
-  return 'Не получилось записать вас автоматически. Наш менеджер свяжется с вами и подтвердит запись.';
+export function failedReply(lang: Lang = 'ru'): string {
+  return lang === 'kk'
+    ? 'Автоматты түрде жаза алмадым. Біздің менеджер сізбен байланысып, жазылуды растайды.'
+    : 'Не получилось записать вас автоматически. Наш менеджер свяжется с вами и подтвердит запись.';
+}
+
+/** Our own reply when the name or phone was missing or not real: ask again instead of confirming. */
+export function needDetailsReply(lang: Lang = 'ru'): string {
+  return lang === 'kk'
+    ? 'Сізді жазу үшін толық аты-жөніңізді және телефон нөміріңізді жазыңыз.'
+    : 'Чтобы записать вас, напишите, пожалуйста, ваше полное имя и номер телефона.';
 }

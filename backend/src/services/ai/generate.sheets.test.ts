@@ -102,6 +102,30 @@ describe('generateReply sheets', () => {
     expect(res.text).toContain('менеджер');
   });
 
+  it('confirms in Kazakh when the client writes in Kazakh', async () => {
+    model('google');
+    mocks.generateText.mockImplementation(async (a: Tools) => {
+      await callBook(a);
+      return { text: '', usage };
+    });
+    const res = await generateReply({ ...args, userMessage: 'Сәлем, ертеңге жазылғым келеді' });
+    expect(res.text).toContain('жаздым');
+    expect(res.text).not.toContain('Записала');
+  });
+
+  it('asks for the name and phone instead of confirming when the details are not real', async () => {
+    model('google');
+    mocks.generateText.mockImplementation(async (a: Tools) => {
+      await a.tools.book_slot.execute({ ...book, name: '😊' }, { toolCallId: '1', messages: [] });
+      return { text: 'Записала вас!', usage };
+    });
+    const res = await generateReply(args);
+    expect(mocks.batchUpdate).not.toHaveBeenCalled();
+    expect(res.text).not.toContain('Записала');
+    expect(res.text).toContain('телефон');
+    expect(res.sheetsFailed).toBe(false);
+  });
+
   it('keeps the tool away and tells the model not to promise a time when the sheet cannot be read', async () => {
     mocks.readSlots.mockRejectedValue(new Error('403'));
     const res = await generateReply(args);

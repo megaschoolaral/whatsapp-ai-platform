@@ -22,7 +22,7 @@ vi.mock('./settings.js', () => ({
   getSheetsSettings: async () => ({ enabled: true, spreadsheetId: 'sheet-id', sheetName: 'Ноябрь', daysAhead: 7 }),
 }));
 
-import { bookSlot, buildSheetsTool, conflictReply, sheetsPromptSection } from './tool.js';
+import { bookSlot, bookedReply, buildSheetsTool, conflictReply, failedReply, needDetailsReply, sheetsPromptSection } from './tool.js';
 
 const D = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
 const T = '23:30';
@@ -100,6 +100,24 @@ describe('bookSlot guards', () => {
     expect(mocks.batchUpdate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['an emoji instead of a name', { name: '😊' }],
+    ['a phone number instead of a name', { name: '87028291238' }],
+    ['a single letter as the name', { name: 'А' }],
+    ['a phone that is too short', { phone: '123' }],
+    ['a phone that is not a number', { phone: 'позже скажу' }],
+  ])('writes nothing for %s', async (_d, over) => {
+    expect(await bookSlot({ ...args, ...over })).toEqual({ status: 'missing_details' });
+    expect(mocks.batchUpdate).not.toHaveBeenCalled();
+  });
+
+  it('flags missing details on the tool state so the reply can ask for them', async () => {
+    const { tool, state } = buildSheetsTool({ tenantId: 't1' });
+    await tool.execute!({ date: D, time: T, name: '😊', phone: '87071112233' }, execOpts);
+    expect(state.missingDetails).toBe(true);
+    expect(state.failed).toBe(false);
+  });
+
   it('does not book a slot that is in the past', async () => {
     const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
     mocks.readSlots.mockResolvedValue([slot({ date: yesterday })]);
@@ -114,7 +132,7 @@ describe('buildSheetsTool', () => {
     mocks.readSlots.mockImplementation(async () => [slot({ free: !taken })]);
     mocks.batchUpdate.mockImplementation(async () => void (taken = true));
     const { tool, state } = buildSheetsTool({ tenantId: 't1' });
-    const call = { date: D, time: T, name: 'Асель', phone: '1' };
+    const call = { date: D, time: T, name: 'Асель', phone: '87071112233' };
     const results = await Promise.all([tool.execute!(call, execOpts), tool.execute!(call, execOpts)]);
     expect(results.map((r) => (r as { status: string }).status).sort()).toEqual(['booked', 'taken']);
     expect(mocks.batchUpdate).toHaveBeenCalledTimes(1);
@@ -123,19 +141,25 @@ describe('buildSheetsTool', () => {
 
   it('remembers what was booked', async () => {
     const { tool, state } = buildSheetsTool({ tenantId: 't1' });
-    await tool.execute!({ date: D, time: T, name: 'А', phone: '1' }, execOpts);
+    await tool.execute!({ date: D, time: T, name: 'Асель', phone: '87071112233' }, execOpts);
     expect(state.lastBooking).toEqual({ date: D, time: T });
   });
 
   it('flags a failure', async () => {
     mocks.batchUpdate.mockRejectedValue(new Error('x'));
     const { tool, state } = buildSheetsTool({ tenantId: 't1' });
-    await tool.execute!({ date: D, time: T, name: 'А', phone: '1' }, execOpts);
+    await tool.execute!({ date: D, time: T, name: 'Асель', phone: '87071112233' }, execOpts);
     expect(state.failed).toBe(true);
   });
 });
 
 describe('prompt text', () => {
+  it('tells the model to ask for the full name and never to take it from the WhatsApp profile', () => {
+    const text = sheetsPromptSection([slot()]);
+    expect(text).toContain('full name');
+    expect(text).toContain('WhatsApp profile name');
+  });
+
   it('lists free slots by date and forbids claiming a booking without the tool result', () => {
     const text = sheetsPromptSection([slot(), slot({ time: '09:30', row: 8 })]);
     expect(text).toContain(D);
@@ -150,5 +174,26 @@ describe('prompt text', () => {
     const none = conflictReply([]);
     expect(none).not.toMatch(/\d\d:\d\d/);
     expect(none).toContain('менеджер');
+  });
+});
+
+describe('replies in the client language', () => {
+  const b = { date: '2026-11-25', time: '09:00' };
+
+  it('confirms in Russian or Kazakh with the date as dd.mm', () => {
+    expect(bookedReply(b, 'ru')).toContain('Записала');
+    expect(bookedReply(b, 'kk')).toContain('жаздым');
+    for (const lang of ['ru', 'kk'] as const) {
+      expect(bookedReply(b, lang)).toContain('25.11');
+      expect(bookedReply(b, lang)).toContain('09:00');
+    }
+  });
+
+  it('every fallback reply exists in Kazakh and sends the client to a manager or asks for the missing details', () => {
+    expect(conflictReply([slot()], 'kk')).toContain('бос');
+    expect(conflictReply([], 'kk')).toContain('менеджер');
+    expect(failedReply('kk')).toContain('менеджер');
+    expect(needDetailsReply('kk')).toContain('телефон');
+    expect(needDetailsReply('ru')).toContain('телефон');
   });
 });
