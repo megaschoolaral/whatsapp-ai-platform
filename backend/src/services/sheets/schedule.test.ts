@@ -73,6 +73,40 @@ describe('parseSchedule tolerance', () => {
   });
 });
 
+describe('parseSchedule with the clinic real sheet (date first, then weekday)', () => {
+  const real = [
+    ['23.11 пн'],
+    ['8:00', 'Жансая', '87070498939', 'пмс кутемз', 'Аида', 'инста', 'повторный', '✅'],
+    ['9:30', 'Мария', '7 747 864 9675', 'Без узи', 'Газиза'],
+    ['08.40', 'Кымбат', '7 747 184 6930'],
+    ['13:30'],
+    ['13.45', 'Әдемі', '+7 747 836 8843', '15000пост'],
+    ['14:15', 'Саера', '7 747 985 0205'],
+    ['14:00', 'Нурай', '7 707 956 2517'],
+    [],
+    ['24.11 вт'],
+    ['10:00', 'Айбике', '+7 747 557 2046'],
+    ['11:30'],
+    ['12:00', 'Әдемі', '+7 747 836 8843'],
+  ];
+  const parsed = parseSchedule(real, new Date('2026-11-23T05:00:00Z'));
+
+  it('finds the slots of both days', () => {
+    expect(parsed.filter((s) => s.date === '2026-11-23')).toHaveLength(7);
+    expect(parsed.filter((s) => s.date === '2026-11-24')).toHaveLength(3);
+  });
+
+  it('finds the empty rows as free and nothing else', () => {
+    expect(parsed.filter((s) => s.free).map((s) => `${s.date} ${s.time}`)).toEqual(['2026-11-23 13:30', '2026-11-24 11:30']);
+  });
+
+  it('reads 08.40 and 13.45 as times, not as dates', () => {
+    const times = parsed.map((s) => s.time);
+    expect(times).toContain('08:40');
+    expect(times).toContain('13:45');
+  });
+});
+
 describe('upcomingFreeSlots', () => {
   const slots = parseSchedule(sheet, today);
   // 2026-11-02 13:15 in Asia/Almaty (UTC+5) is 08:15 UTC

@@ -1,7 +1,10 @@
 import type { Slot } from './types.js';
 
 const WEEKDAY = '(?:понедельник|вторник|среда|четверг|пятница|суббота|воскресенье|пн|вт|ср|чт|пт|сб|вс)';
-const TITLE = new RegExp(`^${WEEKDAY}[\\s.,]*(\\d{1,2})\\s*[.,/]\\s*(\\d{1,2})(?:[.,/]\\d{2,4})?$`, 'i');
+const DATE = '(\\d{1,2})\\s*[.,/]\\s*(\\d{1,2})(?:[.,/]\\d{2,4})?';
+// "пн 02,11" (weekday first) and "23.11 пн" (date first): the clinic sheets use both.
+const TITLE_WEEKDAY_FIRST = new RegExp(`^${WEEKDAY}[\\s.,]*${DATE}$`, 'i');
+const TITLE_DATE_FIRST = new RegExp(`^${DATE}[\\s.,]*${WEEKDAY}$`, 'i');
 const LOOKS_LIKE_TITLE = new RegExp(`^${WEEKDAY}(?![а-яё])`, 'i');
 // 9:00, 09:00:00, 9.00, 9:00 AM, 1:30 PM
 const TIME = /^(\d{1,2})[:.](\d{2})(?::\d{2})?\s*([ap]m)?$/i;
@@ -26,7 +29,7 @@ export function parseSchedule(values: string[][], today: Date): Slot[] {
   let date: string | null = null;
   values.forEach((cells, index) => {
     const first = (cells[0] ?? '').trim();
-    const title = first.match(TITLE);
+    const title = first.match(TITLE_WEEKDAY_FIRST) ?? first.match(TITLE_DATE_FIRST);
     if (title) {
       date = resolveDate(Number(title[1]), Number(title[2]), today);
       return;
