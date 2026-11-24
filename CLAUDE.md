@@ -16,7 +16,7 @@ Monorepo (npm workspaces): `backend/` (Node.js + Express + Prisma + Postgres + R
 - Build: `npm install && npm run build`
 - Start: `npm start` → runs `prisma migrate deploy && node dist/server.js` from backend.
 - Backend serves `frontend/dist` as static.
-- Auto-injected: `DATABASE_URL`, `REDIS_URL`, `PORT`. Manual: `JWT_SECRET`, `ENCRYPTION_KEY`, `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD`, `APP_URL`.
+- Auto-injected: `DATABASE_URL`, `REDIS_URL`, `PORT`. Manual: `JWT_SECRET`, `ENCRYPTION_KEY`, `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD`, `APP_URL`. Optional: `GOOGLE_SERVICE_ACCOUNT_JSON` (service account key for Google Sheets booking; tenants share their sheet with its email).
 - Healthcheck: `/api/health`.
 
 ## Pricing updates
@@ -33,5 +33,6 @@ Prompt: "Search the web for current API pricing for GPT-5.1, Gemini 3 Flash, Gro
 - Inbound buffer logic: `backend/src/services/inboundBuffer/`
 - AI providers + RAG + vision fallback: `backend/src/services/ai/`
 - Baileys: `backend/src/services/whatsapp/`
+- Google Sheets booking (free slots in the prompt, `book_slot` tool): `backend/src/services/sheets/`
 - Conversation state machine: `backend/src/services/conversations/`
 - Onboarding checklist UI: `frontend/src/pages/admin/OnboardingChecklistPage.tsx` and `pages/admin/steps/`.
