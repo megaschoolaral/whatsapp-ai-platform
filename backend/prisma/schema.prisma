@@ -71,6 +71,7 @@ model Tenant {
   whatsappSession    WhatsappSession?
   savedContacts      SavedContact[]
   receiptSettings    TenantReceiptSettings?
+  sheetsSettings     TenantSheetsSettings?
   receipts           Receipt[]
   conversations      Conversation[]
   knowledgeFiles     KnowledgeFile[]
@@ -161,6 +162,17 @@ model TenantReceiptSettings {
   telegramBotTokenEnc  String?  // AES-GCM encrypted
   telegramChatId       String?
   updatedAt            DateTime @updatedAt
+}
+
+/// Per-tenant Google Sheets booking: the AI manager reads free slots from one tab and writes bookings into it.
+model TenantSheetsSettings {
+  tenantId       String   @id
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enabled        Boolean  @default(false)
+  spreadsheetId  String?
+  sheetName      String?
+  daysAhead      Int      @default(7)
+  updatedAt      DateTime @updatedAt
 }
 
 model Receipt {

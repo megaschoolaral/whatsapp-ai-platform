@@ -14,6 +14,8 @@ const schema = z.object({
   // Operator alerts (e.g. WhatsApp disconnected). Optional: without them alerts are only logged.
   TELEGRAM_ALERT_BOT_TOKEN: z.string().min(1).optional(),
   TELEGRAM_ALERT_CHAT_ID: z.string().min(1).optional(),
+  // Google service account (JSON) used for Sheets booking. Optional: without it the feature is unavailable.
+  GOOGLE_SERVICE_ACCOUNT_JSON: z.string().min(1).optional(),
 });
 
 const parsed = schema.safeParse(process.env);
