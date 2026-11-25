@@ -72,6 +72,7 @@ model Tenant {
   savedContacts      SavedContact[]
   receiptSettings    TenantReceiptSettings?
   sheetsSettings     TenantSheetsSettings?
+  bookings           Booking[]
   receipts           Receipt[]
   conversations      Conversation[]
   knowledgeFiles     KnowledgeFile[]
@@ -172,7 +173,31 @@ model TenantSheetsSettings {
   spreadsheetId  String?
   sheetName      String?
   daysAhead      Int      @default(7)
+  /// Reminders to the client 10 h and 1 h before an appointment the AI booked.
+  remindersEnabled Boolean @default(false)
+  /// Custom reminder texts per stage and language; null or empty = built-in default.
+  reminder10hRu  String?
+  reminder10hKk  String?
+  reminder1hRu   String?
+  reminder1hKk   String?
   updatedAt      DateTime @updatedAt
+}
+
+/// An appointment the AI booked in the tenant's sheet; reminder jobs are scheduled from it.
+model Booking {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String
+  jid            String
+  date           String   // YYYY-MM-DD
+  time           String   // HH:mm
+  name           String
+  phone          String
+  lang           String   // 'ru' | 'kk'
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId])
 }
 
 model Receipt {
