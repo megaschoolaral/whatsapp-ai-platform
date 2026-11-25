@@ -1,9 +1,11 @@
 import { Worker } from 'bullmq';
 import { redis } from '../redis.js';
 import { logger } from '../logger.js';
-import { inboundFlushJobName, followupJobName } from './index.js';
+import { inboundFlushJobName, followupJobName, reminderJobName } from './index.js';
 import { flushBuffer } from '../services/inboundBuffer/flush.js';
 import { sendFollowup } from '../services/followup/sender.js';
+import { sendReminder } from '../services/reminders/send.js';
+import type { ReminderStage } from '../services/reminders/time.js';
 
 export function startWorkers(): void {
   const inboundWorker = new Worker(
@@ -47,5 +49,24 @@ export function startWorkers(): void {
 
   followupWorker.on('failed', (job, err) => {
     logger.error({ err, jobId: job?.id }, '[worker:followup] job failed');
+  });
+
+  const reminderWorker = new Worker(
+    'reminder',
+    async (job) => {
+      if (job.name !== reminderJobName) return;
+      const { bookingId, tenantId, stage } = job.data as { bookingId: string; tenantId: string; stage: ReminderStage };
+      try {
+        await sendReminder(bookingId, tenantId, stage);
+      } catch (err) {
+        logger.error({ err, tenantId, bookingId, stage }, '[worker] sendReminder failed');
+        throw err;
+      }
+    },
+    { connection: redis, concurrency: 5 },
+  );
+
+  reminderWorker.on('failed', (job, err) => {
+    logger.error({ err, jobId: job?.id }, '[worker:reminder] job failed');
   });
 }

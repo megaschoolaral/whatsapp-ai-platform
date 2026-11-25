@@ -16,7 +16,7 @@ vi.mock('../../redis.js', () => ({
   },
 }));
 
-import { invalidateSlots, readSlots } from './read.js';
+import { invalidateSlots, readSlotPeople, readSlots } from './read.js';
 
 const rows = (name: string) => ({ data: { values: [['пн 02,11'], ['10:00', name, name ? '1' : '']] } });
 
@@ -65,5 +65,28 @@ describe('readSlots', () => {
   it('throws when the sheet is not configured', async () => {
     mocks.settings.mockResolvedValue({ enabled: true, spreadsheetId: null, sheetName: null, daysAhead: 7 });
     await expect(readSlots('t1')).rejects.toThrow();
+  });
+});
+
+describe('readSlotPeople', () => {
+  const iso = new Date().toISOString().slice(0, 10);
+  const title = `${iso.slice(8)}.${iso.slice(5, 7)} пн`;
+
+  it('reads columns B and C of the row of that date and time', async () => {
+    mocks.get.mockImplementation(async ({ range }: { range: string }) =>
+      range.endsWith('!A:H')
+        ? { data: { values: [[title], ['10:00', 'Асель', '87071112233']] } }
+        : { data: { values: [['Асель', '87071112233']] } },
+    );
+    expect(await readSlotPeople('t1', iso, '10:00')).toEqual({ name: 'Асель', phone: '87071112233' });
+    expect(mocks.get).toHaveBeenLastCalledWith(expect.objectContaining({ range: 'Ноябрь!B2:C2' }));
+  });
+
+  it('returns empty strings for an emptied row and null for an unknown time', async () => {
+    mocks.get.mockImplementation(async ({ range }: { range: string }) =>
+      range.endsWith('!A:H') ? { data: { values: [[title], ['10:00']] } } : { data: {} },
+    );
+    expect(await readSlotPeople('t1', iso, '10:00')).toEqual({ name: '', phone: '' });
+    expect(await readSlotPeople('t1', iso, '11:00')).toBeNull();
   });
 });

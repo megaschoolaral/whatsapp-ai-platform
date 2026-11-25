@@ -32,3 +32,23 @@ export async function readSlots(tenantId: string, opts: { fresh?: boolean } = {}
 export async function invalidateSlots(tenantId: string): Promise<void> {
   await redis.del(cacheKey(tenantId));
 }
+
+/** The name and phone currently in the sheet row of a slot, read fresh; null when that date and time is not in the sheet. */
+export async function readSlotPeople(
+  tenantId: string,
+  date: string,
+  time: string,
+): Promise<{ name: string; phone: string } | null> {
+  const slot = (await readSlots(tenantId, { fresh: true })).find((s) => s.date === date && s.time === time);
+  if (!slot) return null;
+  const settings = await getSheetsSettings(tenantId);
+  const client = getSheetsClient();
+  if (!client || !settings.spreadsheetId || !settings.sheetName) throw new Error('Google Sheets is not configured');
+  const res = await client.spreadsheets.values.get({
+    spreadsheetId: settings.spreadsheetId,
+    range: `${settings.sheetName}!B${slot.row}:C${slot.row}`,
+    valueRenderOption: 'FORMATTED_VALUE',
+  });
+  const cells = (res.data.values?.[0] ?? []) as string[];
+  return { name: (cells[0] ?? '').trim(), phone: (cells[1] ?? '').trim() };
+}
