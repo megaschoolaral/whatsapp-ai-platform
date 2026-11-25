@@ -10,9 +10,22 @@ interface SheetsSettings {
   spreadsheetId: string | null;
   sheetName: string | null;
   daysAhead: number;
+  remindersEnabled: boolean;
+  reminderTexts: ReminderTexts;
+  reminderDefaults: { '10h': { ru: string; kk: string }; '1h': { ru: string; kk: string } };
   /** The platform's service account: the tenant shares the sheet with this email. Null when the platform key is not set. */
   serviceAccountEmail: string | null;
 }
+
+type ReminderTexts = { '10h': { ru: string | null; kk: string | null }; '1h': { ru: string | null; kk: string | null } };
+type FieldKey = '10h.ru' | '10h.kk' | '1h.ru' | '1h.kk';
+const FIELDS: Array<{ key: FieldKey; label: string }> = [
+  { key: '10h.ru', label: '10 сағат бұрын — Русский' },
+  { key: '10h.kk', label: '10 сағат бұрын — Қазақша' },
+  { key: '1h.ru', label: '1 сағат бұрын — Русский' },
+  { key: '1h.kk', label: '1 сағат бұрын — Қазақша' },
+];
+const splitKey = (k: FieldKey) => k.split('.') as ['10h' | '1h', 'ru' | 'kk'];
 
 type CheckResult = { ok: true; freeSlots: number; days: number } | { ok: false; error: string };
 
@@ -23,12 +36,20 @@ export function StepSheets({ tenantId }: { tenantId: string }) {
   const [sheetName, setSheetName] = useState('');
   const [daysAhead, setDaysAhead] = useState('7');
   const [loading, setLoading] = useState(false);
+  const [texts, setTexts] = useState<Record<FieldKey, string>>({ '10h.ru': '', '10h.kk': '', '1h.ru': '', '1h.kk': '' });
 
   const apply = (s: SheetsSettings) => {
     setSettings(s);
     setSpreadsheet(s.spreadsheetId ?? '');
     setSheetName(s.sheetName ?? '');
     setDaysAhead(String(s.daysAhead));
+    // A text the tenant never changed shows the built-in default, so it can be read and edited in place.
+    const next = {} as Record<FieldKey, string>;
+    for (const { key } of FIELDS) {
+      const [stage, lang] = splitKey(key);
+      next[key] = s.reminderTexts[stage][lang] ?? s.reminderDefaults[stage][lang];
+    }
+    setTexts(next);
   };
 
   useEffect(() => {
@@ -70,6 +91,24 @@ export function StepSheets({ tenantId }: { tenantId: string }) {
       } catch (err) {
         toast.error((err as Error).message);
       }
+    }
+    setLoading(false);
+  };
+
+  /** Saves the reminder switch and texts. A text equal to the default is sent as empty so it keeps following the default. */
+  const saveReminders = async (remindersEnabled: boolean) => {
+    if (!settings) return;
+    setLoading(true);
+    const reminderTexts = { '10h': {}, '1h': {} } as Record<'10h' | '1h', Record<'ru' | 'kk', string>>;
+    for (const { key } of FIELDS) {
+      const [stage, lang] = splitKey(key);
+      reminderTexts[stage][lang] = texts[key].trim() === settings.reminderDefaults[stage][lang] ? '' : texts[key];
+    }
+    try {
+      apply(await apiRequest<SheetsSettings>(base, { method: 'PUT', body: { remindersEnabled, reminderTexts } }));
+      toast.success(remindersEnabled ? 'Еске салу қосулы' : 'Сақталды');
+    } catch (err) {
+      toast.error((err as Error).message);
     }
     setLoading(false);
   };
@@ -147,6 +186,56 @@ export function StepSheets({ tenantId }: { tenantId: string }) {
         </Button>
         <Button variant="outline" onClick={onCheck} disabled={loading || unavailable}>
           Байланысты тексеру
+        </Button>
+      </div>
+
+      <div className="space-y-4 rounded-lg border p-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-medium">Клиентке еске салу: {settings.remindersEnabled ? 'қосулы' : 'өшірулі'}</div>
+            <div className="text-sm text-slate-500">
+              Жазылымға 10 сағат және 1 сағат қалғанда клиентке WhatsApp-пен хабарлама жіберіледі. AI жазған клиенттерге ғана
+              жіберіледі.
+            </div>
+          </div>
+          <Button
+            variant={settings.remindersEnabled ? 'outline' : 'default'}
+            disabled={loading || !settings.enabled}
+            onClick={() => saveReminders(!settings.remindersEnabled)}
+          >
+            {settings.remindersEnabled ? 'Өшіру' : 'Қосу'}
+          </Button>
+        </div>
+        {!settings.enabled ? <div className="text-sm text-slate-500">Алдымен жоғарыда Google Sheets-ті қосыңыз.</div> : null}
+
+        <div className="text-sm text-slate-500">Мәтінде {'{date}'} — күні (26.11), {'{time}'} — уақыты (09:00).</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {FIELDS.map(({ key, label }) => {
+            const [stage, lang] = splitKey(key);
+            return (
+              <div key={key} className="space-y-2">
+                <Label>{label}</Label>
+                <textarea
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                  rows={3}
+                  maxLength={500}
+                  value={texts[key]}
+                  onChange={(e) => setTexts((t) => ({ ...t, [key]: e.target.value }))}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setTexts((t) => ({ ...t, [key]: settings.reminderDefaults[stage][lang] }))}
+                >
+                  Әдепкіге қайтару
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+        <Button onClick={() => saveReminders(settings.remindersEnabled)} disabled={loading}>
+          Мәтіндерді сақтау
         </Button>
       </div>
     </div>

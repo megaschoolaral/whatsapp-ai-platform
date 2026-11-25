@@ -6,6 +6,7 @@ import { getServiceAccountEmail } from '../../services/sheets/client.js';
 import { invalidateSlots, readSlots } from '../../services/sheets/read.js';
 import { upcomingFreeSlots } from '../../services/sheets/schedule.js';
 import { getSheetsSettings, parseSpreadsheetId } from '../../services/sheets/settings.js';
+import { defaultReminderText } from '../../services/reminders/texts.js';
 
 export const adminTenantSheetsRouter = Router({ mergeParams: true });
 adminTenantSheetsRouter.use(requireAuth, requireRole('super_admin'));
@@ -16,12 +17,33 @@ const putSchema = z.object({
   spreadsheet: z.string().optional(),
   sheetName: z.string().nullable().optional(),
   daysAhead: z.number().int().min(1).max(30).optional(),
+  remindersEnabled: z.boolean().optional(),
+  /** Custom reminder texts; a missing field keeps the stored text, an empty string clears it back to the default. */
+  reminderTexts: z
+    .object({
+      '10h': z.object({ ru: z.string().max(500).nullable().optional(), kk: z.string().max(500).nullable().optional() }).optional(),
+      '1h': z.object({ ru: z.string().max(500).nullable().optional(), kk: z.string().max(500).nullable().optional() }).optional(),
+    })
+    .optional(),
 });
+
+const MAX_TEXT = 500;
+
+/** A new value wins; an empty string or null clears to the default (null); undefined keeps the stored one. */
+const pickText = (incoming: string | null | undefined, stored: string | null): string | null =>
+  incoming === undefined ? stored : incoming?.trim() ? incoming : null;
 
 const tenantIdOf = (req: Request) => (req.params as Record<string, string>).tenantId as string;
 
 async function view(tenantId: string) {
-  return { ...(await getSheetsSettings(tenantId)), serviceAccountEmail: getServiceAccountEmail() };
+  return {
+    ...(await getSheetsSettings(tenantId)),
+    reminderDefaults: {
+      '10h': { ru: defaultReminderText('10h', 'ru'), kk: defaultReminderText('10h', 'kk') },
+      '1h': { ru: defaultReminderText('1h', 'ru'), kk: defaultReminderText('1h', 'kk') },
+    },
+    serviceAccountEmail: getServiceAccountEmail(),
+  };
 }
 
 export async function getSheetsHandler(req: Request, res: Response) {
@@ -32,7 +54,8 @@ export async function putSheetsHandler(req: Request, res: Response) {
   const tenantId = tenantIdOf(req);
   const parsed = putSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid input' });
+    const tooLong = parsed.error.issues.some((i) => i.path[0] === 'reminderTexts' && i.code === 'too_big');
+    res.status(400).json({ error: tooLong ? `Еске салу мәтіні ${MAX_TEXT} таңбадан аспауы керек` : 'Invalid input' });
     return;
   }
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
@@ -58,6 +81,9 @@ export async function putSheetsHandler(req: Request, res: Response) {
   const sheetName = body.sheetName === undefined ? existing.sheetName : body.sheetName?.trim() || null;
   const enabled = body.enabled ?? existing.enabled;
   const daysAhead = body.daysAhead ?? existing.daysAhead;
+  const remindersEnabled = body.remindersEnabled ?? existing.remindersEnabled ?? false;
+  const old = existing.reminderTexts;
+  const incoming = body.reminderTexts;
 
   if (enabled) {
     if (!getServiceAccountEmail()) {
@@ -70,7 +96,17 @@ export async function putSheetsHandler(req: Request, res: Response) {
     }
   }
 
-  const data = { enabled, spreadsheetId, sheetName, daysAhead };
+  const data = {
+    enabled,
+    spreadsheetId,
+    sheetName,
+    daysAhead,
+    remindersEnabled,
+    reminder10hRu: pickText(incoming?.['10h']?.ru, old?.['10h'].ru ?? null),
+    reminder10hKk: pickText(incoming?.['10h']?.kk, old?.['10h'].kk ?? null),
+    reminder1hRu: pickText(incoming?.['1h']?.ru, old?.['1h'].ru ?? null),
+    reminder1hKk: pickText(incoming?.['1h']?.kk, old?.['1h'].kk ?? null),
+  };
   await prisma.tenantSheetsSettings.upsert({ where: { tenantId }, create: { tenantId, ...data }, update: data });
   await invalidateSlots(tenantId);
   res.json(await view(tenantId));

@@ -29,7 +29,8 @@ function res() {
 }
 const req = (body: unknown = {}, tenantId = 't1') => ({ params: { tenantId }, body }) as unknown as Request;
 const ID = '1AbC-dEf_1234567890abcdefgh';
-const saved = { enabled: false, spreadsheetId: null, sheetName: null, daysAhead: 7 };
+const noTexts = { '10h': { ru: null, kk: null }, '1h': { ru: null, kk: null } };
+const saved = { enabled: false, spreadsheetId: null, sheetName: null, daysAhead: 7, remindersEnabled: false, reminderTexts: noTexts };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -43,7 +44,11 @@ describe('GET', () => {
     const r = res();
     await getSheetsHandler(req({}, 'tenant-b'), r);
     expect(mocks.getSheetsSettings).toHaveBeenCalledWith('tenant-b');
-    expect(r.json).toHaveBeenCalledWith({ ...saved, serviceAccountEmail: 'bot@project.iam.gserviceaccount.com' });
+    expect(r.json).toHaveBeenCalledWith({
+      ...saved,
+      reminderDefaults: expect.objectContaining({ '10h': expect.objectContaining({ ru: expect.stringContaining('{date}') }) }),
+      serviceAccountEmail: 'bot@project.iam.gserviceaccount.com',
+    });
   });
 });
 
@@ -85,6 +90,44 @@ describe('PUT', () => {
     const r = res();
     await putSheetsHandler(req({ enabled: false }), r);
     expect(r.status).toHaveBeenCalledWith(404);
+  });
+});
+
+describe('PUT reminders', () => {
+  const stored = (r: ReturnType<typeof res>) => mocks.upsert.mock.calls[0]![0].update;
+
+  it('switches reminders on and keeps the other stored fields', async () => {
+    mocks.getSheetsSettings.mockResolvedValue({ ...saved, spreadsheetId: ID, sheetName: 'Ноябрь', daysAhead: 14 });
+    const r = res();
+    await putSheetsHandler(req({ remindersEnabled: true }), r);
+    expect(stored(r)).toMatchObject({ remindersEnabled: true, spreadsheetId: ID, sheetName: 'Ноябрь', daysAhead: 14 });
+  });
+
+  it('keeps the saved reminder switch and texts when the body does not mention them', async () => {
+    mocks.getSheetsSettings.mockResolvedValue({
+      ...saved,
+      remindersEnabled: true,
+      reminderTexts: { '10h': { ru: 'Привет {time}', kk: null }, '1h': { ru: null, kk: 'Сәлем' } },
+    });
+    const r = res();
+    await putSheetsHandler(req({ daysAhead: 10 }), r);
+    expect(stored(r)).toMatchObject({
+      remindersEnabled: true, reminder10hRu: 'Привет {time}', reminder10hKk: null, reminder1hRu: null, reminder1hKk: 'Сәлем',
+    });
+  });
+
+  it('stores a custom text, and an empty string clears it back to the default', async () => {
+    const r = res();
+    await putSheetsHandler(req({ reminderTexts: { '10h': { ru: 'Ждём вас {date} в {time}!' }, '1h': { kk: '' } } }), r);
+    expect(stored(r)).toMatchObject({ reminder10hRu: 'Ждём вас {date} в {time}!', reminder1hKk: null });
+  });
+
+  it('rejects a text longer than 500 characters with a clear message', async () => {
+    const r = res();
+    await putSheetsHandler(req({ reminderTexts: { '10h': { ru: 'x'.repeat(501) } } }), r);
+    expect(r.status).toHaveBeenCalledWith(400);
+    expect(r.json).toHaveBeenCalledWith({ error: expect.stringContaining('500') });
+    expect(mocks.upsert).not.toHaveBeenCalled();
   });
 });
 
