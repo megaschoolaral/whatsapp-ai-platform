@@ -116,6 +116,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
   const ragContext = await queryCorpus(tenant, userMessage, conversationId);
 
   const textModel = resolveTextModel(tenant);
+  const lang = detectLang([...history.filter((h) => h.role === 'user').slice(-3).map((h) => h.content), userMessage]);
 
   // Photo tool: only when the tenant uploaded photos and the model can call tools.
   let photo: ReturnType<typeof buildPhotoTool> | null = null;
@@ -138,7 +139,7 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     if (settings.enabled) {
       try {
         const free = upcomingFreeSlots(await readSlots(tenant.id), new Date(), tenant.timezone, settings.daysAhead);
-        sheets = buildSheetsTool({ tenantId: tenant.id });
+        sheets = buildSheetsTool({ tenantId: tenant.id, conversationId, lang });
         sheetsPrompt = sheetsPromptSection(free);
       } catch (err) {
         logger.error({ err, tenantId: tenant.id }, 'sheets: could not read the schedule');
@@ -185,7 +186,6 @@ export async function generateReply(args: GenerateReplyArgs): Promise<GenerateRe
     const raw = stripRepeatedGreeting(result.text, history.length === 0);
     let text = raw.trim() || (queued.length ? FALLBACK_PHOTO_TEXT : raw);
     // The model writes its text before it sees the tool result (always on Google), so the text must never claim a booking that did not happen.
-    const lang = detectLang([...history.filter((h) => h.role === 'user').slice(-3).map((h) => h.content), userMessage]);
     const ownText = !text.trim() || textModel.meta.provider === 'google';
     if (sheets?.state.failed) {
       text = failedReply(lang);

@@ -5,6 +5,7 @@ import { prisma } from '../../prisma.js';
 import { redis } from '../../redis.js';
 import { getSheetsClient } from './client.js';
 import { invalidateSlots, readSlots } from './read.js';
+import { scheduleBookingReminders } from '../reminders/schedule.js';
 import { upcomingFreeSlots } from './schedule.js';
 import { getSheetsSettings } from './settings.js';
 import type { Lang } from './language.js';
@@ -112,7 +113,7 @@ async function writeBooking(args: {
   }
 }
 
-export function buildSheetsTool(ctx: { tenantId: string }) {
+export function buildSheetsTool(ctx: { tenantId: string; conversationId?: string | null; lang?: Lang }) {
   const state = {
     conflict: false,
     missingDetails: false,
@@ -138,6 +139,22 @@ export function buildSheetsTool(ctx: { tenantId: string }) {
         if (res.status === 'booked') {
           state.booked = true;
           state.lastBooking = { date: input.date, time: input.time };
+          if (ctx.conversationId) {
+            // The row is already written: a problem with the reminders must not turn this into a failed booking.
+            try {
+              await scheduleBookingReminders({
+                tenantId: ctx.tenantId,
+                conversationId: ctx.conversationId,
+                date: input.date,
+                time: input.time,
+                name: input.name,
+                phone: input.phone,
+                lang: ctx.lang ?? 'ru',
+              });
+            } catch (err) {
+              logger.error({ err, tenantId: ctx.tenantId }, 'reminders: could not schedule');
+            }
+          }
         }
         if (res.status === 'taken' || res.status === 'not_found') state.conflict = true;
         if (res.status === 'missing_details') state.missingDetails = true;

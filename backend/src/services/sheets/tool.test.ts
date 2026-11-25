@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => ({
   invalidateSlots: vi.fn(),
   batchUpdate: vi.fn(),
   locks: new Set<string>(),
+  schedule: vi.fn(),
 }));
+
+vi.mock('../reminders/schedule.js', () => ({ scheduleBookingReminders: mocks.schedule }));
 
 vi.mock('../../redis.js', () => ({
   redis: {
@@ -123,6 +126,45 @@ describe('bookSlot guards', () => {
     mocks.readSlots.mockResolvedValue([slot({ date: yesterday })]);
     expect(await bookSlot({ ...args, date: yesterday })).toEqual({ status: 'not_found' });
     expect(mocks.batchUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildSheetsTool reminders', () => {
+  const call = { date: D, time: T, name: 'Асель', phone: '87071112233' };
+  const ctx = { tenantId: 't1', conversationId: 'c1', lang: 'kk' as const };
+
+  it('schedules the reminders once after a booking', async () => {
+    const { tool } = buildSheetsTool(ctx);
+    await tool.execute!(call, execOpts);
+    expect(mocks.schedule).toHaveBeenCalledTimes(1);
+    expect(mocks.schedule).toHaveBeenCalledWith({
+      tenantId: 't1', conversationId: 'c1', date: D, time: T, name: 'Асель', phone: '87071112233', lang: 'kk',
+    });
+  });
+
+  it.each([
+    ['taken', [slot({ free: false })], call],
+    ['not_found', [slot()], { ...call, time: '09:05' }],
+    ['missing_details', [slot()], { ...call, name: '😊' }],
+  ])('does not schedule anything for %s', async (_s, slots, input) => {
+    mocks.readSlots.mockResolvedValue(slots);
+    const { tool } = buildSheetsTool(ctx);
+    await tool.execute!(input, execOpts);
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
+  it('does not schedule without a conversation', async () => {
+    const { tool } = buildSheetsTool({ tenantId: 't1' });
+    await tool.execute!(call, execOpts);
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
+  it('keeps the booking successful when scheduling fails', async () => {
+    mocks.schedule.mockRejectedValue(new Error('redis down'));
+    const { tool, state } = buildSheetsTool(ctx);
+    expect(await tool.execute!(call, execOpts)).toEqual({ status: 'booked' });
+    expect(state.booked).toBe(true);
+    expect(state.failed).toBe(false);
   });
 });
 

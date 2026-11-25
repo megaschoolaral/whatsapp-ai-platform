@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => ({
   getSheetsSettings: vi.fn(),
   readSlots: vi.fn(),
   batchUpdate: vi.fn(),
+  schedule: vi.fn(),
 }));
+
+vi.mock('../reminders/schedule.js', () => ({ scheduleBookingReminders: mocks.schedule }));
 
 vi.mock('ai', async (orig) => ({ ...(await orig<typeof import('ai')>()), generateText: mocks.generateText }));
 vi.mock('./providers.js', () => ({ resolveTextModel: mocks.resolveTextModel, resolveVisionModel: vi.fn() }));
@@ -124,6 +127,18 @@ describe('generateReply sheets', () => {
     expect(res.text).not.toContain('Записала');
     expect(res.text).toContain('телефон');
     expect(res.sheetsFailed).toBe(false);
+  });
+
+  it('passes the chat language to the reminder scheduling', async () => {
+    mocks.generateText.mockImplementation(async (a: Tools) => {
+      await callBook(a);
+      return { text: 'ok', usage };
+    });
+    await generateReply({ ...args, userMessage: 'Сәлем, ертеңге жазылғым келеді' });
+    expect(mocks.schedule).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 't1', conversationId: 'c1', lang: 'kk' }));
+    mocks.schedule.mockClear();
+    await generateReply(args);
+    expect(mocks.schedule).toHaveBeenCalledWith(expect.objectContaining({ lang: 'ru' }));
   });
 
   it('keeps the tool away and tells the model not to promise a time when the sheet cannot be read', async () => {
