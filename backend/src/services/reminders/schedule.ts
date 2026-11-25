@@ -35,7 +35,15 @@ export async function scheduleBookingReminders(args: {
     await reminderQueue.add(
       reminderJobName,
       { bookingId: booking.id, tenantId, stage },
-      { delay: delayMs, jobId: `${booking.id}__${stage}`, removeOnComplete: 100, removeOnFail: 50 },
+      {
+        delay: delayMs,
+        jobId: `${booking.id}__${stage}`,
+        // Retries for a reconnecting WhatsApp, an anti-ban pause or a Sheets blip: 30 s, 1, 2, 4, 8 min.
+        attempts: 6,
+        backoff: { type: 'exponential', delay: 30_000 },
+        removeOnComplete: 100,
+        removeOnFail: 50,
+      },
     );
   }
 }

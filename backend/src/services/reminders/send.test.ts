@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   findBooking: vi.fn(),
@@ -30,10 +30,15 @@ const booking = {
 };
 const noCustom = { '10h': { ru: null, kk: null }, '1h': { ru: null, kk: null } };
 
+afterEach(() => vi.useRealTimers());
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.findBooking.mockResolvedValue(booking);
-  mocks.findTenant.mockResolvedValue({ status: 'active' });
+  vi.useFakeTimers({ toFake: ['Date'] });
+  // 03:00 UTC = 08:00 in Almaty: exactly one hour before the 09:00 appointment on 2026-11-26
+  vi.setSystemTime(new Date('2026-11-26T03:00:00Z'));
+  mocks.findTenant.mockResolvedValue({ status: 'active', timezone: 'Asia/Almaty' });
   mocks.getSheetsSettings.mockResolvedValue({ enabled: true, remindersEnabled: true, reminderTexts: noCustom });
   mocks.readSlotPeople.mockResolvedValue({ name: 'Асель', phone: '87028291238' });
   mocks.getSession.mockReturnValue({ status: 'connected', sock: {} });
@@ -61,6 +66,7 @@ describe('sendReminder', () => {
       remindersEnabled: true,
       reminderTexts: { ...noCustom, '10h': { ru: null, kk: 'Ертең {time}-де күтеміз' } },
     });
+    vi.setSystemTime(new Date('2026-11-25T18:00:00Z')); // exactly 10 h before 09:00 Almaty
     await sendReminder('b1', 't1', '10h');
     expect(mocks.sendHumanLikeText).toHaveBeenCalledWith(expect.objectContaining({ text: 'Ертең 09:00-де күтеміз' }));
   });
@@ -88,17 +94,45 @@ describe('sendReminder', () => {
   });
 
   it('does not send for an inactive tenant or without a connected WhatsApp session', async () => {
-    mocks.findTenant.mockResolvedValue({ status: 'suspended' });
-    await sendReminder('b1', 't1', '1h');
-    mocks.findTenant.mockResolvedValue({ status: 'active' });
-    mocks.getSession.mockReturnValue({ status: 'connecting' });
+    mocks.findTenant.mockResolvedValue({ status: 'suspended', timezone: 'Asia/Almaty' });
     await sendReminder('b1', 't1', '1h');
     expect(mocks.sendHumanLikeText).not.toHaveBeenCalled();
   });
 
-  it('stores nothing when the anti-ban limits block the send', async () => {
-    mocks.sendHumanLikeText.mockResolvedValue({ sent: false, reason: 'hourly_hard_limit' });
+  it('fails the job (so BullMQ retries it) when WhatsApp is reconnecting, instead of dropping the reminder', async () => {
+    mocks.getSession.mockReturnValue({ status: 'connecting' });
+    await expect(sendReminder('b1', 't1', '1h')).rejects.toThrow('no_whatsapp_session');
+    expect(mocks.sendHumanLikeText).not.toHaveBeenCalled();
+  });
+
+  it('does not retry when the sheet row changed: that skip is final', async () => {
+    mocks.readSlotPeople.mockResolvedValue({ name: 'Нурай', phone: '87079562517' });
+    await expect(sendReminder('b1', 't1', '1h')).resolves.toBeUndefined();
+  });
+
+  it('sends a reminder that is a few minutes late', async () => {
+    vi.setSystemTime(new Date('2026-11-26T03:10:00Z'));
     await sendReminder('b1', 't1', '1h');
+    expect(mocks.sendHumanLikeText).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a 1 h reminder that is too late to say "in an hour", and any reminder after the appointment started', async () => {
+    vi.setSystemTime(new Date('2026-11-26T03:25:00Z'));
+    await sendReminder('b1', 't1', '1h');
+    vi.setSystemTime(new Date('2026-11-26T04:10:00Z'));
+    await sendReminder('b1', 't1', '10h');
+    expect(mocks.sendHumanLikeText).not.toHaveBeenCalled();
+  });
+
+  it('still sends the 10 h reminder on time', async () => {
+    vi.setSystemTime(new Date('2026-11-25T18:05:00Z'));
+    await sendReminder('b1', 't1', '10h');
+    expect(mocks.sendHumanLikeText).toHaveBeenCalledTimes(1);
+  });
+
+  it('stores nothing and fails the job for a retry when the anti-ban limits block the send', async () => {
+    mocks.sendHumanLikeText.mockResolvedValue({ sent: false, reason: 'hourly_hard_limit' });
+    await expect(sendReminder('b1', 't1', '1h')).rejects.toThrow('hourly_hard_limit');
     expect(mocks.appendMessage).not.toHaveBeenCalled();
   });
 

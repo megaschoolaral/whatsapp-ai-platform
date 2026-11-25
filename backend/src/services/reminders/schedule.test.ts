@@ -51,7 +51,13 @@ describe('scheduleBookingReminders', () => {
     expect(mocks.add).toHaveBeenCalledWith(
       'reminder',
       { bookingId: 'b1', tenantId: 't1', stage: '10h' },
-      expect.objectContaining({ jobId: 'b1__10h', delay: 10 * HOUR }),
+      expect.objectContaining({
+        jobId: 'b1__10h',
+        delay: 10 * HOUR,
+        // a reconnecting WhatsApp or a Sheets blip at send time must not lose the reminder
+        attempts: 6,
+        backoff: { type: 'exponential', delay: 30_000 },
+      }),
     );
     expect(mocks.add).toHaveBeenCalledWith(
       'reminder',
