@@ -12,3 +12,9 @@ export const followupJobName = 'followup';
 export const followupQueue = new Queue('followup', {
   connection: redis,
 });
+
+export const reminderJobName = 'reminder';
+
+export const reminderQueue = new Queue('reminder', {
+  connection: redis,
+});
