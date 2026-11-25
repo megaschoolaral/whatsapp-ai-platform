@@ -34,5 +34,6 @@ Prompt: "Search the web for current API pricing for GPT-5.1, Gemini 3 Flash, Gro
 - AI providers + RAG + vision fallback: `backend/src/services/ai/`
 - Baileys: `backend/src/services/whatsapp/`
 - Google Sheets booking (free slots in the prompt, `book_slot` tool): `backend/src/services/sheets/`
+- Booking reminders (10 h and 1 h before an AI-booked appointment, BullMQ `reminder` queue): `backend/src/services/reminders/`
 - Conversation state machine: `backend/src/services/conversations/`
 - Onboarding checklist UI: `frontend/src/pages/admin/OnboardingChecklistPage.tsx` and `pages/admin/steps/`.
