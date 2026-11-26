@@ -109,7 +109,61 @@ async function writeBooking(args: {
       requestBody: { valueInputOption: 'RAW', data },
     });
     await invalidateSlots(tenantId);
+    await releaseEarlierBookings({
+      tenantId,
+      client,
+      spreadsheetId: settings.spreadsheetId,
+      sheet,
+      slots,
+      keepRow: slot.row,
+      phone,
+      timezone: tenant?.timezone ?? 'Asia/Almaty',
+    });
     return { status: 'booked' };
+  }
+}
+
+const lastDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '').slice(-10);
+
+/**
+ * One client, one booking: after the new row is written, the same client's earlier bookings made by the AI
+ * (same phone, `записал` = AI, today or later) are cleared. Rows a person typed are never touched.
+ * A failure here is logged only: the new booking is already in the sheet.
+ */
+async function releaseEarlierBookings(a: {
+  tenantId: string;
+  client: NonNullable<ReturnType<typeof getSheetsClient>>;
+  spreadsheetId: string;
+  sheet: string;
+  slots: Slot[];
+  keepRow: number;
+  phone: string;
+  timezone: string;
+}): Promise<void> {
+  try {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: a.timezone }).format(new Date());
+    const res = await a.client.spreadsheets.values.get({
+      spreadsheetId: a.spreadsheetId,
+      range: `${a.sheet}!A:H`,
+      valueRenderOption: 'FORMATTED_VALUE',
+    });
+    const values = (res.data.values ?? []) as string[][];
+    const want = lastDigits(a.phone);
+    const rows = a.slots
+      .filter((s) => !s.free && s.row !== a.keepRow && s.date >= today)
+      .filter((s) => {
+        const cells = values[s.row - 1] ?? [];
+        return lastDigits(cells[2]) === want && String(cells[4] ?? '').trim() === BOOKED_BY;
+      })
+      .map((s) => s.row);
+    if (!rows.length) return;
+    await a.client.spreadsheets.values.batchClear({
+      spreadsheetId: a.spreadsheetId,
+      requestBody: { ranges: rows.map((r) => `${a.sheet}!B${r}:F${r}`) },
+    });
+    await invalidateSlots(a.tenantId);
+  } catch (err) {
+    logger.error({ err }, 'sheets: could not release the earlier booking');
   }
 }
 
@@ -182,6 +236,7 @@ Rules:
 - When the client asks whether there is room (for a day, "tomorrow", "are there free times") or wants to book, and has not said a time or a part of the day, your first reply is only the question: do they prefer morning or afternoon (morning = before 12:00, afternoon = from 12:00)? Do not name any time in that first reply. Only after the answer offer one or two free times of that part of the day, the earliest ones; never list the whole schedule. If the client does not like them, offer the next one or two. If the client already named a time or a part of the day, skip the question.
 - Before booking you need the client's full name (first and last name, as it should be written in the schedule) and phone number. Ask for both in one message and always ask for the name, even if you can see the WhatsApp profile name. Never use the WhatsApp profile name and never guess a name.
 - Tool result "missing_details": the name or phone was not real; ask the client for them again.
+- If the client is already booked in this chat, do not call book_slot again for thanks, confirmations or questions about the existing time; just answer briefly and repeat the booked time if asked. Call it again only when the client clearly asks to change the time: the new booking replaces the old one (the old row is released automatically), so tell them the time is changed.
 - Call book_slot only after the client chose a time. Use the date and time exactly as in the list.
 - Tool result "booked": confirm the date and time in one short sentence.
 - Never say the client is booked unless the tool returned "booked".

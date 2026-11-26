@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   readSlots: vi.fn(),
   invalidateSlots: vi.fn(),
   batchUpdate: vi.fn(),
+  getValues: vi.fn(),
+  batchClear: vi.fn(),
   locks: new Set<string>(),
   schedule: vi.fn(),
 }));
@@ -20,7 +22,7 @@ vi.mock('../../redis.js', () => ({
 vi.mock('../../prisma.js', () => ({ prisma: { tenant: { findUnique: async () => ({ timezone: 'Asia/Almaty' }) } } }));
 
 vi.mock('./read.js', () => ({ readSlots: mocks.readSlots, invalidateSlots: mocks.invalidateSlots }));
-vi.mock('./client.js', () => ({ getSheetsClient: () => ({ spreadsheets: { values: { batchUpdate: mocks.batchUpdate } } }) }));
+vi.mock('./client.js', () => ({ getSheetsClient: () => ({ spreadsheets: { values: { batchUpdate: mocks.batchUpdate, get: mocks.getValues, batchClear: mocks.batchClear } } }) }));
 vi.mock('./settings.js', () => ({
   getSheetsSettings: async () => ({ enabled: true, spreadsheetId: 'sheet-id', sheetName: 'Ноябрь', daysAhead: 7 }),
 }));
@@ -38,6 +40,8 @@ beforeEach(() => {
   mocks.locks.clear();
   mocks.readSlots.mockResolvedValue([slot()]);
   mocks.batchUpdate.mockResolvedValue({});
+  mocks.getValues.mockResolvedValue({ data: { values: [] } });
+  mocks.batchClear.mockResolvedValue({});
 });
 
 describe('bookSlot', () => {
@@ -73,6 +77,59 @@ describe('bookSlot', () => {
   it('reports error when the Sheets API fails', async () => {
     mocks.batchUpdate.mockRejectedValue(new Error('quota'));
     expect(await bookSlot(args)).toEqual({ status: 'error' });
+  });
+});
+
+describe('one booking per client', () => {
+  // sheet rows are 1-based: values[row - 1]
+  const sheet = (rows: Record<number, string[]>) => {
+    const values: string[][] = [];
+    for (const [r, v] of Object.entries(rows)) values[Number(r) - 1] = v;
+    return { data: { values: Array.from(values, (v) => v ?? []) } };
+  };
+  const taken = (row: number, time = '10:00') => slot({ row, time, free: false });
+
+  it('releases the same client\'s earlier AI booking after writing the new one', async () => {
+    mocks.readSlots.mockResolvedValue([slot({ row: 9 }), taken(5, '13:00'), taken(6, '13:30')]);
+    mocks.getValues.mockResolvedValue(
+      sheet({
+        5: ['13:00', 'Асель К', '87074304061', '', 'AI', 'WhatsApp'],
+        6: ['13:30', 'Асель К', '+7 707 430 4061', '', 'AI', 'WhatsApp'],
+      }),
+    );
+    expect(await bookSlot(args)).toEqual({ status: 'booked' });
+    expect(mocks.batchClear).toHaveBeenCalledWith({
+      spreadsheetId: 'sheet-id',
+      requestBody: { ranges: ['Ноябрь!B5:F5', 'Ноябрь!B6:F6'] },
+    });
+    // the new row is written before anything is cleared
+    expect(mocks.batchUpdate.mock.invocationCallOrder[0]).toBeLessThan(mocks.batchClear.mock.invocationCallOrder[0]!);
+  });
+
+  it('never clears a person\'s row, another client\'s row or a past booking', async () => {
+    const past = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10);
+    mocks.readSlots.mockResolvedValue([
+      slot({ row: 9 }),
+      taken(5), // same phone but typed by a person (column E is not AI)
+      taken(6), // another client
+      { ...taken(7), date: past }, // same client, but a visit that is already over
+    ]);
+    mocks.getValues.mockResolvedValue(
+      sheet({
+        5: ['10:00', 'Асель К', '87074304061', '', 'Админ', ''],
+        6: ['10:00', 'Бану', '87011112233', '', 'AI', 'WhatsApp'],
+        7: ['10:00', 'Асель К', '87074304061', '', 'AI', 'WhatsApp'],
+      }),
+    );
+    expect(await bookSlot(args)).toEqual({ status: 'booked' });
+    expect(mocks.batchClear).not.toHaveBeenCalled();
+  });
+
+  it('keeps the booking successful when releasing the old row fails', async () => {
+    mocks.readSlots.mockResolvedValue([slot({ row: 9 }), taken(5)]);
+    mocks.getValues.mockResolvedValue(sheet({ 5: ['10:00', 'Асель К', '87074304061', '', 'AI', 'WhatsApp'] }));
+    mocks.batchClear.mockRejectedValue(new Error('quota'));
+    expect(await bookSlot(args)).toEqual({ status: 'booked' });
   });
 });
 
@@ -192,6 +249,15 @@ describe('buildSheetsTool', () => {
     const { tool, state } = buildSheetsTool({ tenantId: 't1' });
     await tool.execute!({ date: D, time: T, name: 'Асель', phone: '87071112233' }, execOpts);
     expect(state.failed).toBe(true);
+  });
+});
+
+describe('prompt text: already booked', () => {
+  it('tells the model not to book again for thanks or confirmations, and that a new time replaces the old one', () => {
+    const p = sheetsPromptSection([slot()]);
+    expect(p).toMatch(/already booked/i);
+    expect(p).toMatch(/thanks/i);
+    expect(p).toMatch(/replaces|released/i);
   });
 });
 
