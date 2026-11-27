@@ -8,18 +8,20 @@ const mocks = vi.hoisted(() => ({
   sendQueuedPhotos: vi.fn(),
   setStatus: vi.fn(),
   scheduleFollowups: vi.fn(),
+  getHistory: vi.fn(),
+  resetAt: null as Date | null,
 }));
 
 vi.mock('../../logger.js', () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 vi.mock('../../prisma.js', () => ({
-  prisma: { conversation: { findFirst: async () => ({ id: 'c1', status: 'ai_active' }) } },
+  prisma: { conversation: { findFirst: async () => ({ id: 'c1', status: 'ai_active', contextResetAt: mocks.resetAt }) } },
 }));
 vi.mock('../../redis.js', () => ({ redis: { set: async () => 'OK', del: async () => 1 } }));
 vi.mock('./buffer.js', () => ({ readAndClearBuffer: mocks.readAndClearBuffer, scheduleFlush: vi.fn() }));
 vi.mock('../tenantContext.js', () => ({ loadTenantContext: async () => ({ id: 't1', status: 'active' }) }));
 vi.mock('../ai/generate.js', () => ({ generateReply: mocks.generateReply }));
 vi.mock('../conversations/store.js', () => ({
-  getConversationHistory: async () => [],
+  getConversationHistory: mocks.getHistory,
   appendMessage: async () => ({}),
 }));
 vi.mock('../conversations/stateMachine.js', () => ({ setStatus: mocks.setStatus }));
@@ -38,6 +40,8 @@ const reply = (over: object = {}) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getHistory.mockResolvedValue([]);
+  mocks.resetAt = null;
   mocks.order.length = 0;
   mocks.readAndClearBuffer.mockResolvedValue({
     messages: [{ text: 'есть фото?', messageId: 'm1', ts: 1 }],
@@ -47,6 +51,15 @@ beforeEach(() => {
   mocks.sendQueuedPhotos.mockImplementation(async () => (mocks.order.push('photos'), { ok: true }));
   mocks.setStatus.mockImplementation(async () => void mocks.order.push('status'));
   mocks.scheduleFollowups.mockImplementation(async () => void mocks.order.push('followups'));
+});
+
+describe('flushBuffer context reset', () => {
+  it('reads the history only from the reset moment on', async () => {
+    mocks.resetAt = new Date('2026-11-27T10:00:00Z');
+    mocks.generateReply.mockResolvedValue(reply());
+    await flushBuffer('t1', 'j@lid');
+    expect(mocks.getHistory).toHaveBeenCalledWith('c1', 30, mocks.resetAt);
+  });
 });
 
 describe('flushBuffer photos', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { apiRequest } from '@/lib/api';
 import { connectSocket, disconnectSocket } from '@/lib/socket';
@@ -15,6 +15,7 @@ interface Conversation {
   status: 'ai_active' | 'human_active' | 'awaiting_human' | 'resolved';
   lastMessageAt: string;
   unreadCount: number;
+  contextResetAt?: string | null;
 }
 
 interface Message {
@@ -108,6 +109,18 @@ export function InboxPage() {
     await apiRequest(`/tenant/conversations/${activeId}/return-to-ai`, { method: 'POST' });
     await loadMessages(activeId);
     await loadConversations();
+  };
+  const resetContext = async () => {
+    if (!activeId) return;
+    if (!window.confirm('Чатты жаңарту? Бот осы сәттен бұрынғы жазысуды ұмытады. Хабарламалар жойылмайды.')) return;
+    try {
+      await apiRequest(`/tenant/conversations/${activeId}/reset-context`, { method: 'POST' });
+      toast.success('Бот контексті тазартылды');
+      await loadMessages(activeId);
+      await loadConversations();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
   };
   const resolve = async () => {
     if (!activeId) return;
@@ -225,15 +238,27 @@ export function InboxPage() {
                     AI
                   </Button>
                 )}
+                <Button size="sm" variant="outline" onClick={resetContext} title="Бот контекстін тазалау: бұрынғы жазысуды ұмытады">
+                  Жаңарту
+                </Button>
                 <Button size="sm" variant="ghost" onClick={resolve}>
                   ✓
                 </Button>
               </div>
             </div>
             <div className="flex-1 overflow-auto p-3 sm:p-4 space-y-2">
-              {messages.map((m) => (
+              {messages.map((m, i) => {
+                const resetAt = activeConv.contextResetAt ? new Date(activeConv.contextResetAt).getTime() : null;
+                const startsNewContext =
+                  resetAt !== null &&
+                  new Date(m.createdAt).getTime() > resetAt &&
+                  (i === 0 || new Date(messages[i - 1]!.createdAt).getTime() <= resetAt);
+                return (
+                <Fragment key={m.id}>
+                {startsNewContext && (
+                  <div className="text-center text-[11px] text-slate-400 py-1">— Бот контексті тазартылды —</div>
+                )}
                 <div
-                  key={m.id}
                   className={cn(
                     'max-w-[85%] sm:max-w-[75%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words',
                     m.direction === 'outgoing' ? 'ml-auto bg-emerald-100' : 'mr-auto bg-slate-100',
@@ -248,7 +273,14 @@ export function InboxPage() {
                     })}
                   </div>
                 </div>
-              ))}
+                </Fragment>
+                );
+              })}
+              {activeConv.contextResetAt &&
+                (messages.length === 0 ||
+                  new Date(messages[messages.length - 1]!.createdAt).getTime() <= new Date(activeConv.contextResetAt).getTime()) && (
+                  <div className="text-center text-[11px] text-slate-400 py-1">— Бот контексті тазартылды —</div>
+                )}
               <div ref={messagesEndRef} />
             </div>
             <div className="border-t p-2 sm:p-3 flex gap-2">

@@ -59,7 +59,7 @@ async function flushBufferLocked(tenantId: string, jid: string): Promise<void> {
   const lastImage = [...messages].reverse().find((m) => m.imageBase64);
 
   // History from DB (excluding the messages we just stored — they'll be in DB already as incoming)
-  const dbHistory = await getConversationHistory(conversationId, 30);
+  const dbHistory = await getConversationHistory(conversationId, 30, conversation.contextResetAt);
   // Buffered messages are already in DB; exclude them (by id) so they aren't duplicated in the prompt.
   const bufferedIds = new Set(messages.map((m) => m.messageId).filter((id): id is string => !!id));
   const priorHistory =

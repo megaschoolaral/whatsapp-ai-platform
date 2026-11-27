@@ -75,10 +75,10 @@ export async function appendMessage(args: {
   return msg;
 }
 
-export async function getConversationHistory(conversationId: string, limit = 20) {
-  // Latest `limit` messages, returned oldest-first.
+export async function getConversationHistory(conversationId: string, limit = 20, since?: Date | null) {
+  // Latest `limit` messages, returned oldest-first. `since`: the chat was reset, older messages are not for the AI.
   const rows = await prisma.message.findMany({
-    where: { conversationId },
+    where: { conversationId, ...(since ? { createdAt: { gt: since } } : {}) },
     orderBy: { createdAt: 'desc' },
     take: limit,
   });

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { requireAuth, tenantIsolation } from '../../auth/middleware.js';
@@ -135,3 +135,18 @@ tenantInboxRouter.post('/conversations/:id/resolve', async (req, res) => {
   await setStatus(conv.id, 'resolved');
   res.json({ ok: true });
 });
+
+/** "Reset chat": from now on the AI ignores everything said before. Messages stay visible in the inbox. */
+export async function resetContextHandler(req: Request, res: Response): Promise<void> {
+  const tenantId = req.tenantScope!;
+  const conv = await prisma.conversation.findFirst({ where: { id: req.params.id, tenantId } });
+  if (!conv) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  const contextResetAt = new Date();
+  await prisma.conversation.update({ where: { id: conv.id }, data: { contextResetAt } });
+  await dropBuffer(tenantId, conv.contactIdentifier);
+  res.json({ ok: true, contextResetAt: contextResetAt.toISOString() });
+}
+tenantInboxRouter.post('/conversations/:id/reset-context', resetContextHandler);
