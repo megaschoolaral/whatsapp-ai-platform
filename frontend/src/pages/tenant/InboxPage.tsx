@@ -43,6 +43,8 @@ export function InboxPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [reply, setReply] = useState('');
+  // Messages from before "reset chat" are hidden unless the operator asks for them.
+  const [showEarlier, setShowEarlier] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Socket handlers are registered once per filter change; read the current chat through a ref
@@ -55,6 +57,8 @@ export function InboxPage() {
     });
     setConversations(data);
   };
+  useEffect(() => setShowEarlier(false), [activeId]);
+
   const loadMessages = async (id: string) => {
     const res = await apiRequest<{ conversation: Conversation; messages: Message[] }>(
       `/tenant/conversations/${id}/messages`,
@@ -128,6 +132,10 @@ export function InboxPage() {
     await loadMessages(activeId);
     await loadConversations();
   };
+
+  const resetAtMs = activeConv?.contextResetAt ? new Date(activeConv.contextResetAt).getTime() : null;
+  const earlierCount =
+    resetAtMs === null ? 0 : messages.filter((m) => new Date(m.createdAt).getTime() <= resetAtMs).length;
 
   // Layout: on md+ side-by-side. On mobile show only one panel at a time.
   // Use available viewport: header (3.5rem) + page padding (~2rem).
@@ -247,8 +255,18 @@ export function InboxPage() {
               </div>
             </div>
             <div className="flex-1 overflow-auto p-3 sm:p-4 space-y-2">
+              {earlierCount > 0 && (
+                <button
+                  type="button"
+                  className="mx-auto block text-xs text-slate-500 underline py-1"
+                  onClick={() => setShowEarlier((v) => !v)}
+                >
+                  {showEarlier ? 'Ескі хабарламаларды жасыру' : `Ескі хабарламаларды көрсету (${earlierCount})`}
+                </button>
+              )}
               {messages.map((m, i) => {
-                const resetAt = activeConv.contextResetAt ? new Date(activeConv.contextResetAt).getTime() : null;
+                if (resetAtMs !== null && !showEarlier && new Date(m.createdAt).getTime() <= resetAtMs) return null;
+                const resetAt = resetAtMs;
                 const startsNewContext =
                   resetAt !== null &&
                   new Date(m.createdAt).getTime() > resetAt &&
